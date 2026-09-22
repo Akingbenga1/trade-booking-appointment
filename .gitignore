@@ -1,0 +1,19 @@
+node_modules/
+.next/
+.env
+.env.local
+server/.env
+dist/
+coverage/
+*.log
+.DS_Store
+capability-test-results.json
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+progressive-update.md
+research.md
+project-requirement.md
+quick-update.md
+client/.env.local
+

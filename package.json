@@ -1,0 +1,18 @@
+{
+  "name": "trade-booking-appointment",
+  "private": true,
+  "scripts": {
+    "docker:up": "docker compose up -d mongo",
+    "docker:down": "docker compose down",
+    "db:check": "node server/scripts/check-mongo.js",
+    "seed": "npm run seed --prefix server",
+    "server": "npm run db:check && npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "dev": "npm run docker:up && npm run db:check && concurrently -k -n server,client -c blue,green \"npm run dev --prefix server\" \"npm run client\"",
+    "test:behaviour": "npm run db:check && npm run test:behaviour --prefix server",
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
