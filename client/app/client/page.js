@@ -1,31 +1,54 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../components/ui';
+import {
+  DateTimeRangePicker,
+  defaultScheduleRange,
+  formatScheduleRange,
+} from '../../components/DateTimeRangePicker';
+import LocationPicker from '../../components/LocationPicker';
+import {
+  MINIMUM_WAGE_PER_HOUR,
+  computePayPreview,
+  formatGbp,
+  formatPaySummary,
+} from '../../lib/jobPay';
 
-const HUB = { lat: 51.5074, lng: -0.1278 };
+const DEFAULT_PLACE = {
+  address: '10 Downing Street, London',
+  latitude: 51.5074,
+  longitude: -0.1278,
+};
 
 export default function ClientPage() {
+  const router = useRouter();
   const user = useRequireRole(['client', 'business']);
   const [requests, setRequests] = useState([]);
   const [notes, setNotes] = useState([]);
+  const [businesses, setBusinesses] = useState([]);
+  const [selectedBusinessId, setSelectedBusinessId] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [form, setForm] = useState({
-    serviceDetails: 'Office deep clean tomorrow',
-    preferredTime: '',
-    address: '10 Downing Street, London',
-    lat: HUB.lat,
-    lng: HUB.lng,
-  });
+  const [schedule, setSchedule] = useState(() => defaultScheduleRange());
+  const [payRatePerHour, setPayRatePerHour] = useState(String(MINIMUM_WAGE_PER_HOUR));
+  const [serviceDetails, setServiceDetails] = useState('Office deep clean tomorrow');
+  const [place, setPlace] = useState(DEFAULT_PLACE);
+
+  const payPreview = useMemo(
+    () =>
+      computePayPreview(payRatePerHour, schedule.scheduleStart, schedule.scheduleEnd),
+    [payRatePerHour, schedule.scheduleStart, schedule.scheduleEnd]
+  );
 
   useEffect(() => {
-    setForm((prev) => ({
-      ...prev,
-      preferredTime: new Date(Date.now() + 86400000).toISOString().slice(0, 16),
-    }));
-  }, []);
+    if (user?.mustSetPassword) {
+      router.replace('/auth/set-password');
+    }
+  }, [user, router]);
 
   const load = useCallback(async () => {
     const [mine, notifications] = await Promise.all([
@@ -34,31 +57,96 @@ export default function ClientPage() {
     ]);
     setRequests(mine);
     setNotes(notifications);
-  }, []);
+    if (user?.role === 'business') {
+      const list = await api('/api/businesses');
+      setBusinesses(list);
+      const preferred =
+        typeof window !== 'undefined'
+          ? sessionStorage.getItem('tba_selected_business')
+          : null;
+      if (preferred) sessionStorage.removeItem('tba_selected_business');
+      setSelectedBusinessId((prev) => {
+        if (preferred && list.some((b) => String(b._id) === String(preferred))) {
+          return String(preferred);
+        }
+        if (prev && list.some((b) => String(b._id) === String(prev))) return prev;
+        return list[0]?._id ? String(list[0]._id) : '';
+      });
+    }
+  }, [user?.role]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.mustSetPassword) return;
     load().catch((e) => setError(e.message));
     const t = setInterval(() => load().catch(() => {}), 5000);
     return () => clearInterval(t);
   }, [user, load]);
 
+  const placeSyncedForBiz = useRef('');
+
+  useEffect(() => {
+    if (user?.role !== 'business') return;
+    const active = businesses.find((b) => String(b._id) === String(selectedBusinessId));
+    if (!active?.address) return;
+    // Only seed the form when the selected business changes — not on every poll refresh.
+    if (placeSyncedForBiz.current === String(selectedBusinessId)) return;
+    placeSyncedForBiz.current = String(selectedBusinessId);
+    setPlace({
+      address: active.address,
+      latitude: active.latitude,
+      longitude: active.longitude,
+    });
+  }, [selectedBusinessId, businesses, user?.role]);
+
   async function submit(e) {
     e.preventDefault();
     setError('');
     setMessage('');
+    if (!schedule.scheduleStart || !schedule.scheduleEnd) {
+      setError('Choose a start and end date/time on the calendar');
+      return;
+    }
+    if (
+      !place.address?.trim() ||
+      !Number.isFinite(Number(place.latitude)) ||
+      !Number.isFinite(Number(place.longitude))
+    ) {
+      setError('Pick an address from the suggestions (or set the map pin)');
+      return;
+    }
+    if (user.role === 'business') {
+      const rate = Number(payRatePerHour);
+      if (!Number.isFinite(rate) || rate < MINIMUM_WAGE_PER_HOUR) {
+        setError(`Hourly rate must be at least ${formatGbp(MINIMUM_WAGE_PER_HOUR)}`);
+        return;
+      }
+      if (payPreview.hours == null) {
+        setError(
+          'End time of day must be after start time of day so working hours × days can be calculated'
+        );
+        return;
+      }
+    }
     try {
+      const body = {
+        serviceDetails,
+        scheduleStart: new Date(schedule.scheduleStart).toISOString(),
+        scheduleEnd: new Date(schedule.scheduleEnd).toISOString(),
+        address: place.address.trim(),
+        latitude: Number(place.latitude),
+        longitude: Number(place.longitude),
+      };
+      if (user.role === 'business') {
+        if (!selectedBusinessId) {
+          setError('Select a business to post for');
+          return;
+        }
+        body.businessId = selectedBusinessId;
+        body.payRatePerHour = Number(payRatePerHour);
+      }
       const created = await api('/api/requests', {
         method: 'POST',
-        body: {
-          serviceDetails: form.serviceDetails,
-          preferredTime: new Date(form.preferredTime).toISOString(),
-          location: {
-            address: form.address,
-            lat: Number(form.lat),
-            lng: Number(form.lng),
-          },
-        },
+        body,
       });
       setMessage(
         created.status === 'unmatched'
@@ -81,26 +169,63 @@ export default function ClientPage() {
     }
   }
 
-  async function updateRequest(id, currentDetails, opts = {}) {
-    const rematch = Boolean(opts.rematch);
-    let serviceDetails = currentDetails;
-    if (!rematch) {
-      const next = window.prompt('Update service details', currentDetails || '');
-      if (next == null || next.trim() === '') return;
-      serviceDetails = next.trim();
-    } else {
-      serviceDetails = form.serviceDetails || currentDetails;
-    }
+  async function remove(id) {
     setError('');
     setMessage('');
     try {
-      const body = { serviceDetails };
+      await api(`/api/requests/${id}/remove`, { method: 'POST' });
+      setMessage('Request removed.');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function updateRequest(id, currentDetails, opts = {}) {
+    const rematch = Boolean(opts.rematch);
+    const currentPay = opts.pay;
+    let nextDetails = currentDetails;
+    if (!rematch) {
+      const next = window.prompt('Update service details', currentDetails || '');
+      if (next == null || next.trim() === '') return;
+      nextDetails = next.trim();
+    } else {
+      nextDetails = serviceDetails || currentDetails;
+      if (
+        !place.address?.trim() ||
+        !Number.isFinite(Number(place.latitude)) ||
+        !Number.isFinite(Number(place.longitude))
+      ) {
+        setError('Pick an address from the suggestions before rematching');
+        return;
+      }
+    }
+
+    let nextPayRate;
+    if (user.role === 'business') {
+      const ratePrompt = window.prompt(
+        `Hourly pay rate (£, min ${formatGbp(MINIMUM_WAGE_PER_HOUR)})`,
+        currentPay?.payRatePerHour != null
+          ? String(currentPay.payRatePerHour)
+          : String(MINIMUM_WAGE_PER_HOUR)
+      );
+      if (ratePrompt == null || ratePrompt.trim() === '') return;
+      nextPayRate = Number(ratePrompt);
+      if (!Number.isFinite(nextPayRate) || nextPayRate < MINIMUM_WAGE_PER_HOUR) {
+        setError(`Hourly rate must be at least ${formatGbp(MINIMUM_WAGE_PER_HOUR)}`);
+        return;
+      }
+    }
+
+    setError('');
+    setMessage('');
+    try {
+      const body = { serviceDetails: nextDetails };
+      if (nextPayRate != null) body.payRatePerHour = nextPayRate;
       if (rematch) {
-        body.location = {
-          address: form.address,
-          lat: Number(form.lat),
-          lng: Number(form.lng),
-        };
+        body.address = place.address.trim();
+        body.latitude = Number(place.latitude);
+        body.longitude = Number(place.longitude);
       }
       const updated = await api(`/api/requests/${id}`, {
         method: 'PATCH',
@@ -119,7 +244,7 @@ export default function ClientPage() {
     }
   }
 
-  if (!user) return null;
+  if (!user || user.mustSetPassword) return null;
 
   return (
     <div className="shell">
@@ -127,49 +252,70 @@ export default function ClientPage() {
       <div className="grid grid-2">
         <div className="card stack">
           <h2>Post a cleaning need</h2>
+          {user.role === 'business' ? (
+            <label>
+              Post as business
+              <select
+                value={selectedBusinessId}
+                onChange={(e) => setSelectedBusinessId(e.target.value)}
+              >
+                {businesses.length === 0 ? (
+                  <option value="">No businesses yet</option>
+                ) : null}
+                {businesses.map((b) => (
+                  <option key={b._id} value={b._id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           <form className="stack" onSubmit={submit}>
             <label>
               What is needed
               <textarea
-                value={form.serviceDetails}
-                onChange={(e) => setForm({ ...form, serviceDetails: e.target.value })}
+                value={serviceDetails}
+                onChange={(e) => setServiceDetails(e.target.value)}
               />
             </label>
             <label>
-              Preferred time
-              <input
-                type="datetime-local"
-                value={form.preferredTime}
-                onChange={(e) => setForm({ ...form, preferredTime: e.target.value })}
-              />
+              Preferred window
+              <DateTimeRangePicker value={schedule} onChange={setSchedule} />
             </label>
-            <label>
-              Address
-              <input
-                value={form.address}
-                onChange={(e) => setForm({ ...form, address: e.target.value })}
-              />
-            </label>
-            <div className="row">
-              <label style={{ flex: 1 }}>
-                Lat
-                <input
-                  type="number"
-                  step="any"
-                  value={form.lat}
-                  onChange={(e) => setForm({ ...form, lat: e.target.value })}
-                />
-              </label>
-              <label style={{ flex: 1 }}>
-                Lng
-                <input
-                  type="number"
-                  step="any"
-                  value={form.lng}
-                  onChange={(e) => setForm({ ...form, lng: e.target.value })}
-                />
-              </label>
-            </div>
+            {user.role === 'business' ? (
+              <>
+                <label>
+                  Hourly pay rate (£)
+                  <input
+                    type="number"
+                    min={MINIMUM_WAGE_PER_HOUR}
+                    step="0.01"
+                    required
+                    value={payRatePerHour}
+                    onChange={(e) => setPayRatePerHour(e.target.value)}
+                  />
+                </label>
+                <p className="muted">
+                  Minimum {formatGbp(MINIMUM_WAGE_PER_HOUR)} / hour
+                </p>
+                <div className="item">
+                  <div className="muted">
+                    {payPreview.hoursPerDay != null && payPreview.days != null
+                      ? `${payPreview.hoursPerDay}h/day × ${payPreview.days} day${
+                          payPreview.days === 1 ? '' : 's'
+                        } = ${payPreview.hours} hours`
+                      : 'Set start/end times with end later in the day than start'}
+                  </div>
+                  <div>
+                    <strong>Total: {formatGbp(payPreview.total)}</strong>
+                    {payPreview.belowMinimum ? (
+                      <span className="error"> (below minimum)</span>
+                    ) : null}
+                  </div>
+                </div>
+              </>
+            ) : null}
+            <LocationPicker value={place} onChange={setPlace} />
             <button type="submit">Submit request</button>
           </form>
           {message ? <div className="success">{message}</div> : null}
@@ -187,6 +333,11 @@ export default function ClientPage() {
               </div>
             ))}
           </div>
+          {user.role === 'business' ? (
+            <p style={{ marginTop: 16 }}>
+              <Link href="/client/businesses/new">Add another business</Link>
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -200,12 +351,25 @@ export default function ClientPage() {
                 <span className="muted">
                   Notified: {r.notifiedCleanerCount ?? 0}
                 </span>
+                {r.businessId?.name ? (
+                  <span className="muted">{r.businessId.name}</span>
+                ) : null}
               </div>
               <div>{r.serviceDetails}</div>
-              <div className="muted">{r.location?.address}</div>
-              {r.preferredTime ? (
+              <div className="muted">{r.address}</div>
+              {r.scheduleStart && r.scheduleEnd ? (
+                <div className="muted">
+                  Window: {formatScheduleRange(r.scheduleStart, r.scheduleEnd)}
+                </div>
+              ) : r.preferredTime ? (
                 <div className="muted">
                   Preferred: {new Date(r.preferredTime).toLocaleString()}
+                </div>
+              ) : null}
+              {r.pay ? (
+                <div className="muted">
+                  Pay: {formatPaySummary(r.pay)}
+                  {r.pay.paymentStatus === 'paid' ? ' · PAID' : ''}
                 </div>
               ) : null}
               {r.assignedCleanerId ? (
@@ -221,6 +385,7 @@ export default function ClientPage() {
                     onClick={() =>
                       updateRequest(r._id, r.serviceDetails, {
                         rematch: r.status === 'unmatched',
+                        pay: r.pay,
                       })
                     }
                   >
@@ -228,6 +393,29 @@ export default function ClientPage() {
                   </button>
                   <button className="danger" type="button" onClick={() => cancel(r._id)}>
                     Cancel
+                  </button>
+                  {r.pay && r.pay.paymentStatus !== 'paid' ? (
+                    <Link href={`/client/pay/${r._id}`}>
+                      <button type="button">Pay for Service</button>
+                    </Link>
+                  ) : null}
+                </div>
+              ) : null}
+              {r.pay &&
+              r.pay.paymentStatus !== 'paid' &&
+              r.status !== 'open' &&
+              r.status !== 'unmatched' &&
+              r.status !== 'cancelled' ? (
+                <div className="row">
+                  <Link href={`/client/pay/${r._id}`}>
+                    <button type="button">Pay for Service</button>
+                  </Link>
+                </div>
+              ) : null}
+              {r.status === 'cancelled' ? (
+                <div className="row">
+                  <button className="danger" type="button" onClick={() => remove(r._id)}>
+                    Remove
                   </button>
                 </div>
               ) : null}

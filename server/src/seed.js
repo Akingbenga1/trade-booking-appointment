@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import { User } from './models/User.js';
 import { CleaningRequest } from './models/CleaningRequest.js';
 import { Notification } from './models/Notification.js';
+import { Business } from './models/Business.js';
 
 const password = 'password123';
 
@@ -15,6 +16,7 @@ async function upsertUser({ name, email, role, isAvailable, currentLocation }) {
       role,
       passwordHash,
       isDisabled: false,
+      mustSetPassword: false,
       isAvailable: Boolean(isAvailable),
       currentLocation: currentLocation || undefined,
     },
@@ -27,6 +29,7 @@ export async function seedDemo({ reset = true } = {}) {
     await Promise.all([
       CleaningRequest.deleteMany({}),
       Notification.deleteMany({}),
+      Business.deleteMany({}),
       User.deleteMany({}),
     ]);
   }
@@ -38,11 +41,7 @@ export async function seedDemo({ reset = true } = {}) {
     email: 'client@demo.com',
     role: 'client',
   });
-  await upsertUser({
-    name: 'Biz Office',
-    email: 'business@demo.com',
-    role: 'business',
-  });
+  // Businesses are created only via /register/business — not seeded.
   await upsertUser({
     name: 'Cleaner One',
     email: 'cleaner1@demo.com',
@@ -76,10 +75,11 @@ async function runCli() {
   await connectDb();
   await seedDemo({ reset: true });
   console.log('Seeded users (password for all: password123)');
-  console.log('  client@demo.com / business@demo.com');
+  console.log('  client@demo.com');
   console.log('  cleaner1@demo.com / cleaner2@demo.com (nearby, available)');
   console.log('  cleaner-far@demo.com (available but far)');
   console.log('  admin@demo.com');
+  console.log('  (no business seed — use /register/business)');
   await disconnectDb();
 }
 

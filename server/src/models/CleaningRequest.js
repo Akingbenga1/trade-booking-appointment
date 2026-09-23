@@ -1,5 +1,4 @@
 import mongoose from 'mongoose';
-import { locationSchema } from './User.js';
 
 const offerSchema = new mongoose.Schema(
   {
@@ -19,10 +18,17 @@ const offerSchema = new mongoose.Schema(
 
 const cleaningRequestSchema = new mongoose.Schema(
   {
+    // Person who posted (notifications / audit). Ownership for business jobs is businessId.
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business' },
     serviceDetails: { type: String, required: true },
-    preferredTime: { type: Date, required: true },
-    location: { type: locationSchema, required: true },
+    // Preferred window (minute precision). preferredTime kept optional for legacy rows.
+    scheduleStart: { type: Date, required: true },
+    scheduleEnd: { type: Date, required: true },
+    preferredTime: { type: Date, required: false },
+    address: { type: String, required: true },
+    latitude: { type: Number, required: true },
+    longitude: { type: Number, required: true },
     status: {
       type: String,
       enum: [
@@ -49,6 +55,8 @@ const cleaningRequestSchema = new mongoose.Schema(
         note: String,
       },
     ],
+    // Soft-delete: set when poster removes a cancelled request from "My requests".
+    deletedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

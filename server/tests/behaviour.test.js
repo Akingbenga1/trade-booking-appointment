@@ -7,14 +7,23 @@ import { connectDb, disconnectDb } from '../src/db.js';
 import { User } from '../src/models/User.js';
 import { CleaningRequest } from '../src/models/CleaningRequest.js';
 import { Notification } from '../src/models/Notification.js';
+import { Business } from '../src/models/Business.js';
+import { CleaningJobPay } from '../src/models/CleaningJobPay.js';
 import {
   createCleaningRequest,
   respondToOffer,
   advanceBooking,
   cancelRequest,
+  removeCancelledRequest,
   forceAssign,
   processExpiries,
 } from '../src/services/requestService.js';
+import {
+  consumeMagicLink,
+  createMagicToken,
+  hashToken,
+  registerBusinessRepresentative,
+} from '../src/services/businessService.js';
 import bcrypt from 'bcryptjs';
 import { config } from '../src/config.js';
 
@@ -42,13 +51,17 @@ describe('system-behviour.md core rules', () => {
     // Real MongoDB only — uses a dedicated test database
     process.env.MONGO_URI =
       process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/trade_booking_test';
+    process.env.OPENCAGE_STUB = '1';
     delete process.env.MEMORY_MONGO;
     config.mongoUri = process.env.MONGO_URI;
+    config.opencageStub = true;
     await connectDb();
     await Promise.all([
       User.deleteMany({}),
       CleaningRequest.deleteMany({}),
       Notification.deleteMany({}),
+      Business.deleteMany({}),
+      CleaningJobPay.deleteMany({}),
     ]);
 
     client = await makeUser({ name: 'Client', email: 't-client@test.com', role: 'client' });
@@ -84,8 +97,9 @@ describe('system-behviour.md core rules', () => {
     const req = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Office deep clean',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '1 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '1 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
 
     assert.equal(req.status, 'open');
@@ -104,8 +118,9 @@ describe('system-behviour.md core rules', () => {
     const req = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Empty area clean',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '2 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '2 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
     assert.equal(req.status, 'unmatched');
     assert.equal(req.notifiedCleanerCount, 0);
@@ -119,8 +134,9 @@ describe('system-behviour.md core rules', () => {
     const req = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Race clean',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '3 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '3 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
 
     await respondToOffer(req._id, cleanerB._id, 'reject');
@@ -152,8 +168,9 @@ describe('system-behviour.md core rules', () => {
     const req = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Double accept',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '4 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '4 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
     await respondToOffer(req._id, cleanerA._id, 'accept');
     await assert.rejects(
@@ -168,17 +185,30 @@ describe('system-behviour.md core rules', () => {
     const openReq = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Cancel me',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '5 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '5 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
     await cancelRequest(openReq._id, { id: client._id.toString(), role: 'client' });
     assert.equal((await CleaningRequest.findById(openReq._id)).status, 'cancelled');
 
+    const notesBefore = await Notification.countDocuments({ requestId: openReq._id });
+    assert.ok(notesBefore >= 1);
+    await removeCancelledRequest(openReq._id, { id: client._id.toString(), role: 'client' });
+    const removed = await CleaningRequest.findById(openReq._id);
+    assert.ok(removed.deletedAt);
+    assert.equal(await Notification.countDocuments({ requestId: openReq._id }), 0);
+    await assert.rejects(
+      () => removeCancelledRequest(openReq._id, { id: client._id.toString(), role: 'client' }),
+      /not found/i
+    );
+
     const req = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Progress job',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '6 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '6 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
     await respondToOffer(req._id, cleanerA._id, 'accept');
     await assert.rejects(
@@ -203,8 +233,9 @@ describe('system-behviour.md core rules', () => {
     const req = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Admin intervene',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '7 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '7 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
     const assigned = await forceAssign(req._id, cleanerB._id, admin._id);
     assert.equal(assigned.status, 'assigned');
@@ -222,8 +253,9 @@ describe('system-behviour.md core rules', () => {
     const req = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Expire matching',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '8 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '8 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
     await CleaningRequest.updateOne(
       { _id: req._id },
@@ -239,8 +271,9 @@ describe('system-behviour.md core rules', () => {
     const req = await createCleaningRequest({
       clientId: client._id,
       serviceDetails: 'Expire offer',
-      preferredTime: new Date(Date.now() + 86400000),
-      location: { address: '9 Demo St', ...hub },
+      scheduleStart: new Date(Date.now() + 86400000),
+      scheduleEnd: new Date(Date.now() + 2 * 86400000),
+      address: '9 Demo St', latitude: hub.lat, longitude: hub.lng,
     });
     // Keep matching window alive; expire only cleanerA offer
     await CleaningRequest.updateOne(
@@ -260,5 +293,75 @@ describe('system-behviour.md core rules', () => {
       fresh.offers.find((o) => String(o.cleanerId) === String(cleanerA._id)).status,
       'ignored'
     );
+  });
+
+  it('business self-onboarding creates person + Business; jobs owned by Business', async () => {
+    const { user, business } = await registerBusinessRepresentative({
+      name: 'Rep One',
+      email: 'biz-rep@test.com',
+      businessName: 'Acme Clean HQ',
+      address: '1 Business Way, London',
+      latitude: hub.lat,
+      longitude: hub.lng,
+      phone: '+44000000000',
+    });
+    assert.equal(user.role, 'business');
+    assert.equal(user.mustSetPassword, true);
+    assert.ok(!user.passwordHash);
+    assert.equal(business.name, 'Acme Clean HQ');
+    assert.ok(business.latitude != null);
+
+    const magic = createMagicToken();
+    user.magicLinkTokenHash = hashToken(magic.token);
+    user.magicLinkExpiresAt = magic.expiresAt;
+    await user.save();
+
+    const verified = await consumeMagicLink(magic.token);
+    assert.equal(String(verified._id), String(user._id));
+    assert.ok(!verified.magicLinkTokenHash);
+
+    const scheduleStart = new Date(Date.now() + 86400000);
+    scheduleStart.setHours(9, 0, 0, 0);
+    const scheduleEnd = new Date(scheduleStart);
+    scheduleEnd.setDate(scheduleEnd.getDate() + 1);
+    scheduleEnd.setHours(17, 0, 0, 0);
+
+    const req = await createCleaningRequest({
+      clientId: user._id,
+      businessId: business._id,
+      serviceDetails: 'Business office clean',
+      scheduleStart,
+      scheduleEnd,
+      address: 'Biz site', latitude: hub.lat, longitude: hub.lng,
+      payRatePerHour: 12.71,
+    });
+    assert.equal(String(req.businessId), String(business._id));
+    assert.equal(String(req.clientId), String(user._id));
+    assert.ok(req.pay);
+    assert.equal(req.pay.payRatePerHour, 12.71);
+    assert.equal(req.pay.currency, 'GBP');
+    // 8h/day × 2 days
+    assert.equal(req.pay.durationHours, 16);
+    assert.equal(req.pay.totalAmount, Math.round(12.71 * 16 * 100) / 100);
+    const payRow = await CleaningJobPay.findOne({ requestId: req._id });
+    assert.ok(payRow);
+    assert.equal(String(payRow.businessId), String(business._id));
+
+    await assert.rejects(
+      () =>
+        createCleaningRequest({
+          clientId: user._id,
+          businessId: business._id,
+          serviceDetails: 'Too low',
+          scheduleStart,
+          scheduleEnd,
+          address: 'Biz site', latitude: hub.lat, longitude: hub.lng,
+          payRatePerHour: 10,
+        }),
+      (err) => err.status === 400
+    );
+
+    await cancelRequest(req._id, { id: user._id.toString(), role: 'business' });
+    assert.equal((await CleaningRequest.findById(req._id)).status, 'cancelled');
   });
 });

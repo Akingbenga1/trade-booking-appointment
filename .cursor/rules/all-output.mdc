@@ -1,4 +1,35 @@
 ---
+description: Plain-language reply style for every agent on this project
 alwaysApply: true
 ---
-All responses must always be a list of statement. Each statement must not be more than 3 sentences. Do tis always until, I ask you to expand your answer. 
+
+# Reply style (always)
+
+Use this style in every response, for every agent, on this project — until the user asks to expand.
+
+## Format
+
+- Reply as a list of short statements (bullets).
+- Each statement must be at most 3 sentences.
+- Use clear section headings when the topic has several parts.
+- Prefer plain words over jargon; if a term is needed, explain it in one simple line.
+
+## Tone and clarity
+
+- Write so a non-expert can follow on first read.
+- One idea per bullet.
+- Say what it means in practice, not only technical labels.
+- Avoid dense stacked jargon, long compound sentences, and vague phrases like “hot path” or “fan-out” unless you immediately explain them in plain English.
+
+## Example of the preferred style
+
+- This product needs to handle many jobs and many cleaners at once.
+- Right now it works for small use, not for very high volume.
+- When a job is posted, the system loads almost all available cleaners, then checks distance one by one.
+- That gets slower as the cleaner list grows.
+
+## Do not
+
+- Do not write long essay paragraphs as the default.
+- Do not bury the point under technical wording.
+- Stop using this compact style only when the user explicitly asks you to expand.

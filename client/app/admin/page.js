@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../components/ui';
+import { formatScheduleRange } from '../../components/DateTimeRangePicker';
+import { formatPaySummary } from '../../lib/jobPay';
 
 export default function AdminPage() {
   const user = useRequireRole('admin');
@@ -135,7 +137,15 @@ export default function AdminPage() {
                 <span className="muted">Notified {selected.notifiedCleanerCount}</span>
               </div>
               <div>{selected.serviceDetails}</div>
-              <div className="muted">{selected.location?.address}</div>
+              <div className="muted">{selected.address}</div>
+              {selected.scheduleStart && selected.scheduleEnd ? (
+                <div className="muted">
+                  Window: {formatScheduleRange(selected.scheduleStart, selected.scheduleEnd)}
+                </div>
+              ) : null}
+              {selected.pay ? (
+                <div className="muted">Pay: {formatPaySummary(selected.pay)}</div>
+              ) : null}
               <div className="muted">
                 Client: {selected.clientId?.name || selected.clientId}
               </div>

@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../components/ui';
+import { formatScheduleRange } from '../../components/DateTimeRangePicker';
+import JobMap from '../../components/JobMap';
+import { formatPaySummary } from '../../lib/jobPay';
 
 const HUB = { lat: 51.5074, lng: -0.1278 };
 const NEXT_STEP = {
@@ -162,7 +165,19 @@ export default function CleanerPage() {
                 </span>
               </div>
               <div>{request.serviceDetails}</div>
-              <div className="muted">{request.location?.address}</div>
+              <JobMap
+                address={request.address}
+                latitude={request.latitude}
+                longitude={request.longitude}
+              />
+              {request.scheduleStart && request.scheduleEnd ? (
+                <div className="muted">
+                  Window: {formatScheduleRange(request.scheduleStart, request.scheduleEnd)}
+                </div>
+              ) : null}
+              {request.pay ? (
+                <div className="muted">Pay: {formatPaySummary(request.pay)}</div>
+              ) : null}
               <div className="row">
                 <button type="button" onClick={() => respond(request.id, 'accept')}>
                   Accept
@@ -187,6 +202,19 @@ export default function CleanerPage() {
               <div className="item stack" key={r._id}>
                 <StatusBadge status={r.status} />
                 <div>{r.serviceDetails}</div>
+                <JobMap
+                  address={r.address}
+                  latitude={r.latitude}
+                  longitude={r.longitude}
+                />
+                {r.scheduleStart && r.scheduleEnd ? (
+                  <div className="muted">
+                    Window: {formatScheduleRange(r.scheduleStart, r.scheduleEnd)}
+                  </div>
+                ) : null}
+                {r.pay ? (
+                  <div className="muted">Pay: {formatPaySummary(r.pay)}</div>
+                ) : null}
                 {NEXT_STEP[r.status] ? (
                   <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>
                     Mark {NEXT_STEP[r.status].replaceAll('_', ' ')}

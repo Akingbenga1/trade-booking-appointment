@@ -1,11 +1,30 @@
 import { User } from '../models/User.js';
 import { CleaningRequest } from '../models/CleaningRequest.js';
+import { Notification } from '../models/Notification.js';
 import { config } from '../config.js';
 import { distanceKm } from './geo.js';
 import { notify, notifyMany } from './notify.js';
+import { isBusinessMember } from './businessService.js';
+import { parseScheduleRange } from './schedule.js';
+import {
+  attachPayToRequests,
+  createJobPayForRequest,
+  syncJobPayForRequest,
+} from './jobPay.js';
+
+/** Mongo filter: exclude soft-deleted requests. */
+export const notDeletedFilter = { deletedAt: null };
 
 function pushHistory(request, status, by, note) {
   request.statusHistory.push({ status, by, note, at: new Date() });
+}
+
+function assertNotDeleted(request) {
+  if (request?.deletedAt) {
+    const err = new Error('Request not found');
+    err.status = 404;
+    throw err;
+  }
 }
 
 export async function findNearbyAvailableCleaners(lat, lng, radiusKm = config.matchRadiusKm) {
@@ -28,22 +47,32 @@ export async function findNearbyAvailableCleaners(lat, lng, radiusKm = config.ma
 
 export async function createCleaningRequest({
   clientId,
+  businessId,
   serviceDetails,
-  preferredTime,
-  location,
+  scheduleStart,
+  scheduleEnd,
+  address,
+  latitude,
+  longitude,
+  payRatePerHour,
 }) {
+  const schedule = parseScheduleRange(scheduleStart, scheduleEnd);
   const now = new Date();
   // Offers stay open for the full matching window so accept remains possible until unmatched.
   const matchingExpiresAt = new Date(now.getTime() + config.matchingWindowSeconds * 1000);
   const offerExpiresAt = matchingExpiresAt;
 
-  const nearby = await findNearbyAvailableCleaners(location.lat, location.lng);
+  const nearby = await findNearbyAvailableCleaners(latitude, longitude);
 
   const request = new CleaningRequest({
     clientId,
+    businessId: businessId || undefined,
     serviceDetails,
-    preferredTime: new Date(preferredTime),
-    location,
+    scheduleStart: schedule.scheduleStart,
+    scheduleEnd: schedule.scheduleEnd,
+    address,
+    latitude,
+    longitude,
     status: nearby.length ? 'open' : 'unmatched',
     matchingExpiresAt,
     notifiedCleanerCount: nearby.length,
@@ -67,6 +96,21 @@ export async function createCleaningRequest({
   });
 
   await request.save();
+
+  if (businessId) {
+    try {
+      await createJobPayForRequest({
+        requestId: request._id,
+        businessId,
+        payRatePerHour,
+        scheduleStart: schedule.scheduleStart,
+        scheduleEnd: schedule.scheduleEnd,
+      });
+    } catch (err) {
+      await CleaningRequest.deleteOne({ _id: request._id });
+      throw err;
+    }
+  }
 
   if (nearby.length) {
     await notifyMany(
@@ -93,7 +137,9 @@ export async function createCleaningRequest({
     });
   }
 
-  return request;
+  const plain = request.toObject();
+  await attachPayToRequests(plain);
+  return plain;
 }
 
 export async function respondToOffer(requestId, cleanerId, action) {
@@ -103,6 +149,7 @@ export async function respondToOffer(requestId, cleanerId, action) {
     err.status = 404;
     throw err;
   }
+  assertNotDeleted(request);
 
   if (request.status !== 'open') {
     const err = new Error(
@@ -235,6 +282,7 @@ export async function advanceBooking(requestId, cleanerId, nextStatus) {
     err.status = 404;
     throw err;
   }
+  assertNotDeleted(request);
   if (String(request.assignedCleanerId) !== String(cleanerId)) {
     const err = new Error('Only the assigned cleaner can update progress');
     err.status = 403;
@@ -270,11 +318,14 @@ export async function cancelRequest(requestId, actor) {
     err.status = 404;
     throw err;
   }
+  assertNotDeleted(request);
 
   const isAdmin = actor.role === 'admin';
-  const isOwner = String(request.clientId) === String(actor.id);
+  const isPersonOwner = String(request.clientId) === String(actor.id);
+  const isBusinessOwner =
+    request.businessId && (await isBusinessMember(actor.id, request.businessId));
 
-  if (!isAdmin && !isOwner) {
+  if (!isAdmin && !isPersonOwner && !isBusinessOwner) {
     const err = new Error('Forbidden');
     err.status = 403;
     throw err;
@@ -314,18 +365,62 @@ export async function cancelRequest(requestId, actor) {
   return request;
 }
 
-export async function updateOpenRequest(requestId, clientId, patch) {
+/**
+ * Soft-delete a cancelled request and hard-delete all notifications for it
+ * (cleaners, admin, poster — every Notification with this requestId).
+ */
+export async function removeCancelledRequest(requestId, actor) {
   const request = await CleaningRequest.findById(requestId);
   if (!request) {
     const err = new Error('Request not found');
     err.status = 404;
     throw err;
   }
-  if (String(request.clientId) !== String(clientId)) {
+  assertNotDeleted(request);
+
+  const isAdmin = actor.role === 'admin';
+  const isPersonOwner = String(request.clientId) === String(actor.id);
+  const isBusinessOwner =
+    request.businessId && (await isBusinessMember(actor.id, request.businessId));
+
+  if (!isAdmin && !isPersonOwner && !isBusinessOwner) {
     const err = new Error('Forbidden');
     err.status = 403;
     throw err;
   }
+
+  if (request.status !== 'cancelled') {
+    const err = new Error('Only cancelled requests can be removed');
+    err.status = 409;
+    throw err;
+  }
+
+  request.deletedAt = new Date();
+  pushHistory(request, 'cancelled', `${actor.role}:${actor.id}`, 'Removed (soft-deleted)');
+  await request.save();
+
+  await Notification.deleteMany({ requestId: request._id });
+
+  return request;
+}
+
+export async function updateOpenRequest(requestId, actorId, patch) {
+  const request = await CleaningRequest.findById(requestId);
+  if (!request) {
+    const err = new Error('Request not found');
+    err.status = 404;
+    throw err;
+  }
+  assertNotDeleted(request);
+  const isPersonOwner = String(request.clientId) === String(actorId);
+  const isBusinessOwner =
+    request.businessId && (await isBusinessMember(actorId, request.businessId));
+  if (!isPersonOwner && !isBusinessOwner) {
+    const err = new Error('Forbidden');
+    err.status = 403;
+    throw err;
+  }
+  const clientId = actorId;
   if (!['open', 'unmatched'].includes(request.status)) {
     const err = new Error('Can only update while request is open or unmatched');
     err.status = 409;
@@ -334,16 +429,29 @@ export async function updateOpenRequest(requestId, clientId, patch) {
 
   const wasUnmatched = request.status === 'unmatched';
   if (patch.serviceDetails) request.serviceDetails = patch.serviceDetails;
-  if (patch.preferredTime) request.preferredTime = new Date(patch.preferredTime);
-  if (patch.location) request.location = patch.location;
+  let scheduleTouched = false;
+  if (patch.scheduleStart != null || patch.scheduleEnd != null) {
+    const schedule = parseScheduleRange(
+      patch.scheduleStart ?? request.scheduleStart,
+      patch.scheduleEnd ?? request.scheduleEnd
+    );
+    request.scheduleStart = schedule.scheduleStart;
+    request.scheduleEnd = schedule.scheduleEnd;
+    scheduleTouched = true;
+  }
+  if (patch.address != null || patch.latitude != null || patch.longitude != null) {
+    request.address = patch.address ?? request.address;
+    request.latitude = patch.latitude ?? request.latitude;
+    request.longitude = patch.longitude ?? request.longitude;
+  }
 
   // Adjusting an unmatched request re-runs nearby matching
   if (wasUnmatched) {
     const now = new Date();
     const matchingExpiresAt = new Date(now.getTime() + config.matchingWindowSeconds * 1000);
     const nearby = await findNearbyAvailableCleaners(
-      request.location.lat,
-      request.location.lng
+      request.latitude,
+      request.longitude
     );
     request.matchingExpiresAt = matchingExpiresAt;
     request.notifiedCleanerCount = nearby.length;
@@ -364,6 +472,10 @@ export async function updateOpenRequest(requestId, clientId, patch) {
         : 'Client adjusted; still no nearby cleaners'
     );
     await request.save();
+
+    if (request.businessId && (scheduleTouched || patch.payRatePerHour != null)) {
+      await syncJobPayForRequest(request, { payRatePerHour: patch.payRatePerHour });
+    }
 
     if (nearby.length) {
       await notifyMany(
@@ -389,14 +501,22 @@ export async function updateOpenRequest(requestId, clientId, patch) {
         requestId: request._id,
       });
     }
-    return request;
+    const plain = request.toObject();
+    await attachPayToRequests(plain);
+    return plain;
   }
 
   pushHistory(request, 'open', `client:${clientId}`, 'Client updated request');
   await request.save();
-  return request;
-}
 
+  if (request.businessId && (scheduleTouched || patch.payRatePerHour != null)) {
+    await syncJobPayForRequest(request, { payRatePerHour: patch.payRatePerHour });
+  }
+
+  const plain = request.toObject();
+  await attachPayToRequests(plain);
+  return plain;
+}
 export async function forceAssign(requestId, cleanerId, adminId) {
   const cleaner = await User.findOne({ _id: cleanerId, role: 'cleaner' });
   if (!cleaner) {
@@ -411,6 +531,7 @@ export async function forceAssign(requestId, cleanerId, adminId) {
     err.status = 404;
     throw err;
   }
+  assertNotDeleted(request);
   if (['completed', 'cancelled'].includes(request.status)) {
     const err = new Error('Cannot assign a finished request');
     err.status = 409;
@@ -478,6 +599,7 @@ export async function processExpiries() {
 
   // Expire individual pending offers → ignored
   const withPending = await CleaningRequest.find({
+    ...notDeletedFilter,
     status: 'open',
     offers: { $elemMatch: { status: 'pending', expiresAt: { $lte: now } } },
   });
@@ -496,6 +618,7 @@ export async function processExpiries() {
 
   // Matching window ended with no accept → unmatched
   const expiredMatching = await CleaningRequest.find({
+    ...notDeletedFilter,
     status: 'open',
     matchingExpiresAt: { $lte: now },
   });

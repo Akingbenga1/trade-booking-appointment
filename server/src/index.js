@@ -11,6 +11,10 @@ import cleanerRoutes from './routes/cleaners.js';
 import requestRoutes from './routes/requests.js';
 import adminRoutes from './routes/admin.js';
 import notificationRoutes from './routes/notifications.js';
+import businessRoutes from './routes/businesses.js';
+import placesRoutes from './routes/places.js';
+import paymentRoutes from './routes/payments.js';
+import { startEmailQueueWorker } from './services/emailQueue.js';
 
 const app = express();
 app.use(cors({ origin: config.clientOrigin, credentials: true }));
@@ -33,6 +37,9 @@ app.use('/api/cleaners', cleanerRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/businesses', businessRoutes);
+app.use('/api/places', placesRoutes);
+app.use('/api/payments', paymentRoutes);
 
 app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message || 'Server error' });
@@ -48,6 +55,8 @@ export async function startServer() {
       console.log('Seeded demo users (password123)');
     }
   }
+
+  startEmailQueueWorker();
 
   setInterval(() => {
     processExpiries().catch((e) => console.error('expiry job', e.message));

@@ -139,6 +139,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .badge.accepted, .badge.live { background: #dff5e6; color: var(--ok); }
 .badge.rejected, .badge.ignored, .badge.closed, .badge.unavailable { background: #f0ece4; color: #666; }
 .badge.client, .badge.admin, .badge.cleaner { background: #eee; color: #444; }
+.badge.paid { background: #dff5e6; color: var(--ok); }
+.badge.unpaid, .badge.failed { background: #f8e2e2; color: var(--danger); }
 
 .list {
   display: grid;
@@ -188,4 +190,82 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   border-radius: 10px;
   padding: 10px;
   color: var(--muted);
+}
+
+/* Date/time range calendar */
+.dtrp-toolbar {
+  justify-content: space-between;
+  align-items: center;
+}
+.dtrp-hint { font-size: 0.85rem; }
+.dtrp-weekdays,
+.dtrp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.dtrp-weekdays span {
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.dtrp-day {
+  aspect-ratio: 1;
+  padding: 0;
+  border-radius: 8px;
+  background: #f7f4ec;
+  color: var(--ink);
+  font-weight: 500;
+  min-height: 36px;
+}
+.dtrp-day:hover { background: var(--accent-soft); }
+.dtrp-day.in-range { background: var(--accent-soft); }
+.dtrp-day.is-start,
+.dtrp-day.is-end {
+  background: var(--accent);
+  color: #fff;
+}
+.dtrp-summary {
+  font-size: 0.9rem;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.dtrp-times input[type='time'] {
+  width: 100%;
+}
+
+/* Location picker + job maps */
+.map-frame {
+  width: 100%;
+  height: 220px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  overflow: hidden;
+  z-index: 0;
+}
+
+.place-suggestions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.place-suggestions button {
+  width: 100%;
+  text-align: left;
+  border-radius: 10px;
+  font-weight: 500;
+  font-size: 0.88rem;
+  white-space: normal;
+}
+
+.location-picker {
+  gap: 8px;
 }

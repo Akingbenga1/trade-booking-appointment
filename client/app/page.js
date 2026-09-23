@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, clearSession, getStoredUser, setSession } from '../lib/api';
 
@@ -20,6 +21,10 @@ export default function HomePage() {
 
   useEffect(() => {
     const user = getStoredUser();
+    if (user?.mustSetPassword) {
+      router.replace('/auth/set-password');
+      return;
+    }
     if (user?.role && ROLE_HOME[user.role]) {
       router.replace(ROLE_HOME[user.role]);
     }
@@ -35,7 +40,11 @@ export default function HomePage() {
         body: { email, password },
       });
       setSession(data.token, data.user);
-      router.push(ROLE_HOME[data.user.role] || '/');
+      if (data.user.mustSetPassword) {
+        router.push('/auth/set-password');
+      } else {
+        router.push(ROLE_HOME[data.user.role] || '/');
+      }
     } catch (err) {
       clearSession();
       setError(err.message);
@@ -49,7 +58,7 @@ export default function HomePage() {
       <div className="card login-card stack">
         <div>
           <h1>Cleaning Booking Hub</h1>
-          <p className="muted">Sign in as client, cleaner, or admin.</p>
+          <p className="muted">Sign in with your password.</p>
         </div>
         <form className="stack" onSubmit={onSubmit}>
           <label>
@@ -69,10 +78,15 @@ export default function HomePage() {
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
+        <p className="muted">
+          New business? <Link href="/register/business">Register your business</Link>
+        </p>
         <div className="demo">
-          Demo: client@demo.com · business@demo.com · cleaner1@demo.com · cleaner2@demo.com · admin@demo.com
+          Demo: client@demo.com · cleaner1@demo.com · cleaner2@demo.com · admin@demo.com
           <br />
           Password: password123
+          <br />
+          Businesses: use Register your business (not seeded)
         </div>
       </div>
     </div>

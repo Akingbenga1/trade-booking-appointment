@@ -2,18 +2,21 @@ import { Router } from 'express';
 import { User } from '../models/User.js';
 import { CleaningRequest } from '../models/CleaningRequest.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { forceAssign, cancelRequest } from '../services/requestService.js';
+import { forceAssign, cancelRequest, notDeletedFilter } from '../services/requestService.js';
+import { attachPayToRequests } from '../services/jobPay.js';
 
 const router = Router();
 
 router.use(requireAuth, requireRole('admin'));
 
 router.get('/requests', async (_req, res) => {
-  const list = await CleaningRequest.find()
+  const list = await CleaningRequest.find(notDeletedFilter)
     .sort({ createdAt: -1 })
     .populate('clientId', 'name email')
     .populate('assignedCleanerId', 'name email');
-  res.json(list);
+  const plain = list.map((d) => d.toObject());
+  await attachPayToRequests(plain);
+  res.json(plain);
 });
 
 router.get('/requests/:id', async (req, res) => {
@@ -21,8 +24,10 @@ router.get('/requests/:id', async (req, res) => {
     .populate('clientId', 'name email')
     .populate('assignedCleanerId', 'name email')
     .populate('offers.cleanerId', 'name email');
-  if (!doc) return res.status(404).json({ error: 'Not found' });
-  res.json(doc);
+  if (!doc || doc.deletedAt) return res.status(404).json({ error: 'Not found' });
+  const plain = doc.toObject();
+  await attachPayToRequests(plain);
+  res.json(plain);
 });
 
 router.get('/users', async (_req, res) => {
@@ -82,6 +87,7 @@ router.post('/requests/:id/cancel', async (req, res) => {
 
 router.get('/stats', async (_req, res) => {
   const rows = await CleaningRequest.aggregate([
+    { $match: { deletedAt: null } },
     { $group: { _id: '$status', count: { $sum: 1 } } },
   ]);
   const stats = Object.fromEntries(rows.map((r) => [r._id, r.count]));

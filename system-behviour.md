@@ -1,7 +1,8 @@
 # System Behaviour
 
 How the product should behave for each core user.  
-Source of truth for journeys and capabilities: `progressive-update.md`.
+Source of truth for journeys and capabilities: `progressive-update.md`.  
+Planned / in-flight product notes: `quick-update.md`.
 
 Matching: nearby cleaners are notified together (open nearby board).  
 Responses: accept, reject, and ignore are tracked; first successful accept wins; booking then follows a clear lifecycle.
@@ -12,7 +13,7 @@ Responses: accept, reject, and ignore are tracked; first successful accept wins;
 
 These apply across roles.
 
-1. A cleaning need is posted with what, when, and where.
+1. A cleaning need is posted with what, when (preferred datetime window), and where.
 2. The system finds available cleaners closest to that location and notifies that set together.
 3. While the request is **Open**, notified cleaners may accept, reject, or ignore.
 4. **Accept** — first successful accept assigns the cleaner; request becomes **Assigned**; other notified cleaners are told it is no longer available; their pending offers close.
@@ -21,6 +22,9 @@ These apply across roles.
 7. If no cleaner accepts before the overall matching window ends, the request becomes **Unmatched** and the client/business is informed.
 8. After assignment, the booking moves through progress steps until **Completed** (or **Cancelled** where allowed).
 9. The system keeps a trail of who was offered and who accepted, rejected, or ignored.
+10. When a **business** posts a need, the request is owned by the **Business entity** (not the representative’s person account alone).
+11. Businesses are created through self-registration (`/register/business`), not by seeding as part of this flow.
+12. When a **business** posts a need, they must set an hourly pay rate at or above **£12.71**; total pay = rate × (working hours per day × inclusive days in the preferred window); stored in a separate `CleaningJobPay` record (not card checkout).
 
 ---
 
@@ -28,33 +32,53 @@ These apply across roles.
 
 ### What the system allows
 
-- Sign in as a client or business.
-- Post a cleaning need (service details, preferred time, location).
-- View their own requests and bookings.
+- Sign in as a client or business (password login is the primary path for existing / legacy accounts).
+- **Business only — self-onboard:** register at `/register/business` (linked from the login page) with representative details (name, email) plus business details (name, premises address, phone).
+- **Business only — after signup:** complete signup via magic-link email, then set a password before ongoing use of the hub.
+- **Business only — already registered:** sign in first, then land on the business profile (`/client` hub for `role: business`).
+- **Business only — account model:** person account with `role: business` linked to one or more Business entities (multiple businesses allowed from day one; add further entities at `/client/businesses/new`).
+- **Business only — post as the business:** post cleaning needs owned by the selected Business entity; premises address is stored with geocoded lat/lng for matching.
+- **Business only — pay rate:** set hourly rate (≥ £12.71); see duration and total on the form before submit; pay is stored per job in `CleaningJobPay`.
+- Post a cleaning need (service details, preferred datetime window via calendar range, location; business also includes pay rate).
+- View their own requests and bookings (for business: those belonging to their Business entity/entities).
 - Track status from open through assigned work to completion (or unmatched / cancelled).
 - Cancel or update a request only while it is still open and no cleaner is locked in (before assignment).
+- After cancel, **Remove** soft-deletes the request from “My requests” and permanently deletes all notifications tied to that request (cleaners, admin, poster).
 - After assignment, see who is assigned and follow job progress.
 - Be notified when: nearby cleaners have been notified; a cleaner accepts; matching fails; major booking status changes; the job completes.
+- **Business only — go live immediately:** after registration, post jobs with no admin approval gate and no separate email-verification gate beyond signup delivery.
 
 ### How the system behaves for them
 
 | Situation | System behaviour |
 |-----------|------------------|
-| They submit a valid cleaning need | Request is created as **Open**; nearby available cleaners are notified; client sees confirmation that matching has started. |
-| No cleaners are available nearby | Client is informed that no match was found / request cannot be filled as posted. |
-| Cleaners are responding | Client sees the request still **Open** (they do not need the full per-cleaner attempt list unless the product surfaces a simple summary). |
-| A cleaner accepts | Request becomes **Assigned**; client sees the assigned cleaner and can follow progress. |
-| Other cleaners still had the offer open | Those offers close; client is not left thinking multiple cleaners are assigned. |
-| Nobody accepts in time | Request becomes **Unmatched**; client is told and can repost or adjust details. |
+| A new business representative opens `/register/business` | They can register with personal + business fields; email must be unique; required fields must be present. |
+| Signup email is sent | Magic link is delivered by email (queued); after successful signup they are prompted to set a password. |
+| An existing `role: business` user chooses “Already have an account? Sign in” | Password login is preferred; after success they land on the business profile. |
+| A client, cleaner, or admin opens the business registration page | System does not convert or upgrade them to business via this page. |
+| A business user posts a valid cleaning need | Request is created as **Open** and owned by the **Business entity**; nearby available cleaners are notified; poster sees confirmation that matching has started; a `CleaningJobPay` row stores rate (≥ £12.71) and total for the window. |
+| A business tries to post below £12.71/hour | Submit is blocked; no request or pay row is created. |
+| They submit a valid cleaning need (client) | Request is created as **Open**; nearby available cleaners are notified; client sees confirmation that matching has started. |
+| No cleaners are available nearby | Client/business is informed that no match was found / request cannot be filled as posted. |
+| Cleaners are responding | Client/business sees the request still **Open** (they do not need the full per-cleaner attempt list unless the product surfaces a simple summary). |
+| A cleaner accepts | Request becomes **Assigned**; client/business sees the assigned cleaner and can follow progress. |
+| Other cleaners still had the offer open | Those offers close; client/business is not left thinking multiple cleaners are assigned. |
+| Nobody accepts in time | Request becomes **Unmatched**; client/business is told and can repost or adjust details. |
 | They try to change or cancel after assignment | System blocks or limits that according to “only before cleaner is locked in,” unless admin intervenes. |
-| Cleaner updates job progress | Client sees the same progress (e.g. on the way → working → done). |
-| Job finished | Client sees **Completed**. |
+| They cancel a request (while open/unmatched) | Request becomes **Cancelled**; they can then **Remove** it. |
+| They remove a cancelled request | Request is soft-deleted (hidden from lists); all notifications for that requestId are hard-deleted. |
+| Cleaner updates job progress | Client/business sees the same progress (e.g. on the way → working → done). |
+| Job finished | Client/business sees **Completed**. |
 
 ### What they should not experience
 
 - Being left unsure whether anyone was notified.
 - Seeing two cleaners assigned to the same request.
 - Losing track of whether the request is still waiting, assigned, unmatched, or done.
+- **Business:** depending on seeded demo business accounts to get onto the platform.
+- **Business:** registering successfully but being blocked from posting until an admin approves.
+- **Business:** posting a job that is owned only by their person account with no Business entity.
+- **Business:** posting without a valid hourly rate at or above £12.71, or without seeing the total first.
 
 ---
 
@@ -66,7 +90,7 @@ These apply across roles.
 - Go available (live) with a current location so they can be included in nearby matching.
 - Go unavailable so they stop receiving new nearby offers.
 - Receive notifications for nearby cleaning needs.
-- Open an offer with distance, location context, timing, job details, and a response window.
+- Open an offer with distance, location context, timing, job details, pay (when set by a business), and a response window.
 - Respond with **accept**, **reject**, or **ignore** (including letting the timer expire).
 - After accepting: move the job through on-the-way / on-site / in progress / completed style steps.
 - See personal history of accepted, rejected, and ignored offers.
@@ -102,7 +126,7 @@ These apply across roles.
 - Sign in to the admin side of the hub.
 - View open and historical requests across the platform.
 - Open a request and see: current status; who was notified; who accepted, rejected, or ignored.
-- Oversee client/business and cleaner accounts.
+- Oversee client/business and cleaner accounts (including business representatives linked to Business entities).
 - Intervene: force-assign a cleaner, resolve a stuck request, or cancel where allowed.
 - See overall activity (open, assigned, unmatched, completed).
 
@@ -111,16 +135,18 @@ These apply across roles.
 | Situation | System behaviour |
 |-----------|------------------|
 | They open the request list | They can scan by status and recency. |
-| They open one request | They see the matching trail and current status, not only a single label. |
+| They open one request | They see the matching trail and current status, not only a single label; for business-posted jobs, ownership is the Business entity and pay (rate/total) from `CleaningJobPay` when present. |
 | A request is stuck Open with no progress | They can inspect attempts and intervene (force-assign or cancel / resolve). |
-| They force-assign a cleaner | Request becomes **Assigned** to that cleaner; conflicting open offers for others are closed; client and cleaner are updated accordingly. |
-| They cancel a request | Request becomes **Cancelled**; affected client and any assigned cleaner are informed as appropriate. |
+| They force-assign a cleaner | Request becomes **Assigned** to that cleaner; conflicting open offers for others are closed; client/business and cleaner are updated accordingly. |
+| They cancel a request | Request becomes **Cancelled**; affected client/business and any assigned cleaner are informed as appropriate. |
 | They review users | They can see and manage client/business and cleaner accounts on the hub. |
+| A new business appears on the platform | It arrived via `/register/business` self-onboarding, not via seed as part of that change; admin does not need to approve before the business can post. |
 
 ### What they should not experience
 
 - Blind status labels with no way to see who was offered or how they responded.
 - No path to unstick a request that matching left hanging.
+- Expecting seeded demo businesses as the only way business accounts exist after this change.
 
 ---
 
@@ -128,12 +154,13 @@ These apply across roles.
 
 | Status | Meaning | Typical trigger |
 |--------|---------|-----------------|
-| **Open** | Posted; nearby cleaners notified; waiting for accept | Client submits need; matching started |
+| **Open** | Posted; nearby cleaners notified; waiting for accept | Client or business submits need; matching started |
 | **Assigned** | A cleaner has taken it | First successful accept, or admin force-assign |
 | **In progress** | Cleaner is executing the job (includes on-the-way / on-site as shown in product) | Assigned cleaner advances the booking |
-| **Completed** | Work finished | Cleaner completes; client sees done |
+| **Completed** | Work finished | Cleaner completes; client/business sees done |
 | **Unmatched** | No cleaner accepted in time | Matching window ends with no accept |
-| **Cancelled** | Stopped by client (pre-assign) or admin | Explicit cancel / resolve |
+| **Cancelled** | Stopped by client/business (pre-assign) or admin | Explicit cancel / resolve |
+| **Removed** (soft) | Cancelled request hidden after Remove; row kept with `deletedAt` | Poster removes from My requests; notifications for that request hard-deleted |
 
 Per cleaner, against each offer: **accepted**, **rejected**, or **ignored**.
 
@@ -146,3 +173,5 @@ Per cleaner, against each offer: **accepted**, **rejected**, or **ignored**.
 - Reject and ignore never assign the job; they only close that cleaner’s offer.
 - Client, cleaner, and admin always see a consistent status for the same request.
 - Notifications fire on the moments that change what someone must do next (new offer, assigned, unavailable, unmatched, progress, completed).
+- Business-posted requests are owned by the Business entity; a representative may be linked to multiple businesses.
+- Businesses enter via `/register/business` self-onboarding (password-first ongoing login; magic link for signup delivery), not via seed for this change.

@@ -1,19 +1,11 @@
 import mongoose from 'mongoose';
 
-const locationSchema = new mongoose.Schema(
-  {
-    address: { type: String, required: true },
-    lat: { type: Number, required: true },
-    lng: { type: Number, required: true },
-  },
-  { _id: false }
-);
-
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     email: { type: String, required: true, unique: true, lowercase: true },
-    passwordHash: { type: String, required: true },
+    // Optional until business signup completes set-password after magic link
+    passwordHash: { type: String, required: false },
     role: {
       type: String,
       enum: ['client', 'business', 'cleaner', 'admin'],
@@ -21,7 +13,10 @@ const userSchema = new mongoose.Schema(
     },
     // Soft-disable for admin oversight (login blocked when true)
     isDisabled: { type: Boolean, default: false },
-    // Cleaner-only fields
+    mustSetPassword: { type: Boolean, default: false },
+    magicLinkTokenHash: { type: String },
+    magicLinkExpiresAt: { type: Date },
+    // Cleaner-only fields (live "I am here" — separate from job address)
     isAvailable: { type: Boolean, default: false },
     currentLocation: {
       lat: Number,
@@ -33,4 +28,3 @@ const userSchema = new mongoose.Schema(
 );
 
 export const User = mongoose.model('User', userSchema);
-export { locationSchema };

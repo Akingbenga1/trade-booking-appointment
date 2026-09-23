@@ -98,8 +98,9 @@ async function main() {
       token: client.token,
       body: {
         serviceDetails: 'Office deep clean tomorrow',
-        preferredTime: new Date(Date.now() + 86400000).toISOString(),
-        location: { address: '10 Downing Street, London', lat: HUB.lat, lng: HUB.lng },
+        scheduleStart: new Date(Date.now() + 86400000).toISOString(),
+        scheduleEnd: new Date(Date.now() + 2 * 86400000).toISOString(),
+        address: '10 Downing Street, London', latitude: HUB.lat, longitude: HUB.lng,
       },
     });
     if (status === 201 && data.status === 'open') {
@@ -158,8 +159,9 @@ async function main() {
       token: client.token,
       body: {
         serviceDetails: 'Cancel me',
-        preferredTime: new Date(Date.now() + 86400000).toISOString(),
-        location: { address: 'Somewhere', lat: HUB.lat, lng: HUB.lng },
+        scheduleStart: new Date(Date.now() + 86400000).toISOString(),
+        scheduleEnd: new Date(Date.now() + 2 * 86400000).toISOString(),
+        address: 'Somewhere', latitude: HUB.lat, longitude: HUB.lng,
       },
     });
     const { status, data: cancelled } = await api(`/api/requests/${cancelReq._id}/cancel`, {
@@ -253,8 +255,9 @@ async function main() {
       token: client.token,
       body: {
         serviceDetails: 'Ignore test job',
-        preferredTime: new Date(Date.now() + 86400000).toISOString(),
-        location: { address: 'Ignore St', lat: HUB.lat, lng: HUB.lng },
+        scheduleStart: new Date(Date.now() + 86400000).toISOString(),
+        scheduleEnd: new Date(Date.now() + 2 * 86400000).toISOString(),
+        address: 'Ignore St', latitude: HUB.lat, longitude: HUB.lng,
       },
     });
     const { status, data: resp } = await api(`/api/requests/${ignoreReq._id}/respond`, {
@@ -297,8 +300,9 @@ async function main() {
       token: client.token,
       body: {
         serviceDetails: 'Race accept job',
-        preferredTime: new Date(Date.now() + 86400000).toISOString(),
-        location: { address: 'Race St', lat: HUB.lat, lng: HUB.lng },
+        scheduleStart: new Date(Date.now() + 86400000).toISOString(),
+        scheduleEnd: new Date(Date.now() + 2 * 86400000).toISOString(),
+        address: 'Race St', latitude: HUB.lat, longitude: HUB.lng,
       },
     });
     await api(`/api/requests/${raceReq._id}/respond`, {
@@ -407,8 +411,9 @@ async function main() {
       token: client.token,
       body: {
         serviceDetails: 'No cleaners available job',
-        preferredTime: new Date(Date.now() + 86400000).toISOString(),
-        location: { address: 'Empty', lat: HUB.lat, lng: HUB.lng },
+        scheduleStart: new Date(Date.now() + 86400000).toISOString(),
+        scheduleEnd: new Date(Date.now() + 2 * 86400000).toISOString(),
+        address: 'Empty', latitude: HUB.lat, longitude: HUB.lng,
       },
     });
     if (data.status === 'unmatched') {
@@ -476,8 +481,9 @@ async function main() {
       token: client.token,
       body: {
         serviceDetails: 'Force assign me',
-        preferredTime: new Date(Date.now() + 86400000).toISOString(),
-        location: { address: 'Force St', lat: HUB.lat, lng: HUB.lng },
+        scheduleStart: new Date(Date.now() + 86400000).toISOString(),
+        scheduleEnd: new Date(Date.now() + 2 * 86400000).toISOString(),
+        address: 'Force St', latitude: HUB.lat, longitude: HUB.lng,
       },
     });
     const { status, data: assigned } = await api(`/api/admin/requests/${forceReq._id}/force-assign`, {
@@ -502,8 +508,9 @@ async function main() {
       token: client.token,
       body: {
         serviceDetails: 'Admin cancel me',
-        preferredTime: new Date(Date.now() + 86400000).toISOString(),
-        location: { address: 'Cancel St', lat: HUB.lat, lng: HUB.lng },
+        scheduleStart: new Date(Date.now() + 86400000).toISOString(),
+        scheduleEnd: new Date(Date.now() + 2 * 86400000).toISOString(),
+        address: 'Cancel St', latitude: HUB.lat, longitude: HUB.lng,
       },
     });
     const { status, data: cancelled } = await api(`/api/admin/requests/${data._id}/cancel`, {
