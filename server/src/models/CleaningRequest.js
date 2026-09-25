@@ -57,6 +57,8 @@ const cleaningRequestSchema = new mongoose.Schema(
     ],
     // Soft-delete: set when poster removes a cancelled request from "My requests".
     deletedAt: { type: Date, default: null },
+    // Soft-hide: set when poster archives a (typically paid) request; still visible to cleaners.
+    archivedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

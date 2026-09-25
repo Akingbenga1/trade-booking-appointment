@@ -72,6 +72,10 @@ async function processEmailQueue() {
 
 async function sendEmail(job) {
   const id = job.meta?.id || 'unknown';
+  const attempts = Number(job.meta?.attempts || 0) + 1;
+  const maxAttempts = Number(job.meta?.maxAttempts || 5);
+  job.meta = { ...(job.meta || {}), attempts };
+
   const transport = getTransporter();
   if (!transport) {
     console.log(
@@ -80,7 +84,7 @@ async function sendEmail(job) {
     return;
   }
   try {
-    console.log(`[email] sending id=${id} to=${job.to}…`);
+    console.log(`[email] sending id=${id} to=${job.to} attempt=${attempts}…`);
     const info = await transport.sendMail({
       from: config.mailtrap.from,
       to: job.to,
@@ -93,7 +97,16 @@ async function sendEmail(job) {
     );
   } catch (err) {
     console.error(`[email] FAILED id=${id} to=${job.to}: ${err.message}`);
-    throw err;
+    if (attempts < maxAttempts) {
+      const delay = Math.min(32_000, 1000 * 2 ** attempts);
+      console.warn(`[email] retry id=${id} in ${delay}ms attempt=${attempts}/${maxAttempts}`);
+      setTimeout(() => {
+        queue.push(job);
+        void processEmailQueue();
+      }, delay);
+      return;
+    }
+    console.error(`[email] giving up id=${id} after ${attempts} attempts`);
   }
 }
 

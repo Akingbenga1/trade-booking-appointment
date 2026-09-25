@@ -1,6 +1,8 @@
 import { User } from '../models/User.js';
 import { CleaningRequest } from '../models/CleaningRequest.js';
 import { Notification } from '../models/Notification.js';
+import { BusinessPayment } from '../models/BusinessPayment.js';
+import { Transaction } from '../models/Transaction.js';
 import { config } from '../config.js';
 import { distanceKm } from './geo.js';
 import { notify, notifyMany } from './notify.js';
@@ -15,6 +17,9 @@ import {
 /** Mongo filter: exclude soft-deleted requests. */
 export const notDeletedFilter = { deletedAt: null };
 
+/** Poster hub: exclude deleted and archived. */
+export const activeForPosterFilter = { deletedAt: null, archivedAt: null };
+
 function pushHistory(request, status, by, note) {
   request.statusHistory.push({ status, by, note, at: new Date() });
 }
@@ -25,6 +30,21 @@ function assertNotDeleted(request) {
     err.status = 404;
     throw err;
   }
+}
+
+function assertNotArchived(request) {
+  if (request?.archivedAt) {
+    const err = new Error('Request not found');
+    err.status = 404;
+    throw err;
+  }
+}
+
+async function isRequestPaid(requestId) {
+  const ownership = await BusinessPayment.findOne({ requestId });
+  if (!ownership) return false;
+  const transaction = await Transaction.findById(ownership.transactionId);
+  return Boolean(transaction && transaction.status === 'paid');
 }
 
 export async function findNearbyAvailableCleaners(lat, lng, radiusKm = config.matchRadiusKm) {
@@ -319,6 +339,7 @@ export async function cancelRequest(requestId, actor) {
     throw err;
   }
   assertNotDeleted(request);
+  assertNotArchived(request);
 
   const isAdmin = actor.role === 'admin';
   const isPersonOwner = String(request.clientId) === String(actor.id);
@@ -328,6 +349,12 @@ export async function cancelRequest(requestId, actor) {
   if (!isAdmin && !isPersonOwner && !isBusinessOwner) {
     const err = new Error('Forbidden');
     err.status = 403;
+    throw err;
+  }
+
+  if (await isRequestPaid(request._id)) {
+    const err = new Error('Cannot cancel a paid job. Hide it to archive instead.');
+    err.status = 409;
     throw err;
   }
 
@@ -377,6 +404,7 @@ export async function removeCancelledRequest(requestId, actor) {
     throw err;
   }
   assertNotDeleted(request);
+  assertNotArchived(request);
 
   const isAdmin = actor.role === 'admin';
   const isPersonOwner = String(request.clientId) === String(actor.id);
@@ -404,6 +432,42 @@ export async function removeCancelledRequest(requestId, actor) {
   return request;
 }
 
+/**
+ * Archive (hide) a request from the poster's active list. Job stays active for cleaners.
+ */
+export async function archiveRequest(requestId, actor) {
+  const request = await CleaningRequest.findById(requestId);
+  if (!request) {
+    const err = new Error('Request not found');
+    err.status = 404;
+    throw err;
+  }
+  assertNotDeleted(request);
+  assertNotArchived(request);
+
+  const isAdmin = actor.role === 'admin';
+  const isPersonOwner = String(request.clientId) === String(actor.id);
+  const isBusinessOwner =
+    request.businessId && (await isBusinessMember(actor.id, request.businessId));
+
+  if (!isAdmin && !isPersonOwner && !isBusinessOwner) {
+    const err = new Error('Forbidden');
+    err.status = 403;
+    throw err;
+  }
+
+  if (!(await isRequestPaid(request._id))) {
+    const err = new Error('Only paid jobs can be archived. Cancel unpaid jobs instead.');
+    err.status = 409;
+    throw err;
+  }
+
+  request.archivedAt = new Date();
+  pushHistory(request, request.status, `${actor.role}:${actor.id}`, 'Archived (hidden from My requests)');
+  await request.save();
+  return request;
+}
+
 export async function updateOpenRequest(requestId, actorId, patch) {
   const request = await CleaningRequest.findById(requestId);
   if (!request) {
@@ -412,6 +476,7 @@ export async function updateOpenRequest(requestId, actorId, patch) {
     throw err;
   }
   assertNotDeleted(request);
+  assertNotArchived(request);
   const isPersonOwner = String(request.clientId) === String(actorId);
   const isBusinessOwner =
     request.businessId && (await isBusinessMember(actorId, request.businessId));

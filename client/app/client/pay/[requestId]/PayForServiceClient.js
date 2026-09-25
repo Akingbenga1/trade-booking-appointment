@@ -72,43 +72,12 @@ export default function PayForServicePage() {
     }
   }
 
-  async function completeStubPayment() {
-    const sessionId = searchParams.get('session_id');
-    setError('');
-    setMessage('');
-    setLoading(true);
-    try {
-      let sid = sessionId;
-      if (!sid || searchParams.get('cancelled') === '1') {
-        const created = await api(`/api/payments/checkout/${requestId}`, {
-          method: 'POST',
-        });
-        sid = created.sessionId;
-        router.replace(`/client/pay/${requestId}?session_id=${sid}`);
-      }
-      const result = await api(`/api/payments/confirm/${requestId}`, {
-        method: 'POST',
-        body: { sessionId: sid },
-      });
-      setData((prev) => (prev ? { ...prev, pay: result.pay } : prev));
-      setMessage('Payment successful (test mode).');
-      await load();
-      router.replace(`/client/pay/${requestId}`);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   if (!user || user.mustSetPassword) return null;
 
   const pay = data?.pay;
   const request = data?.request;
   const isPaid = pay?.paymentStatus === 'paid';
-  const sessionId = searchParams.get('session_id');
   const cancelled = searchParams.get('cancelled') === '1';
-  const isStubSession = Boolean(sessionId?.startsWith('stub_cs_'));
 
   return (
     <div className="shell">
@@ -117,10 +86,7 @@ export default function PayForServicePage() {
         <div>
           <h2>Stripe payment</h2>
           <p className="muted">
-            Pay the total for this cleaning request securely
-            {isStubSession || !sessionId
-              ? ' (test checkout — no live Stripe key configured).'
-              : ' via Stripe Checkout.'}
+            Pay the total for this cleaning request securely via Stripe Checkout.
           </p>
         </div>
 
@@ -156,14 +122,17 @@ export default function PayForServicePage() {
             </div>
 
             {isPaid ? (
-              <div className="success">
-                Paid
-                {pay.paidAt ? ` on ${new Date(pay.paidAt).toLocaleString()}` : ''}.
+              <div className="stack">
+                <div className="success">
+                  Paid
+                  {pay.paidAt ? ` on ${new Date(pay.paidAt).toLocaleString()}` : ''}.
+                </div>
+                {pay.receiptUrl ? (
+                  <a href={pay.receiptUrl} target="_blank" rel="noreferrer">
+                    Download receipt
+                  </a>
+                ) : null}
               </div>
-            ) : isStubSession ? (
-              <button type="button" disabled={loading} onClick={completeStubPayment}>
-                {loading ? 'Processing…' : `Pay ${formatGbp(pay.totalAmount)} (test card)`}
-              </button>
             ) : (
               <button type="button" disabled={loading} onClick={startCheckout}>
                 {loading ? 'Redirecting…' : `Pay ${formatGbp(pay.totalAmount)} with Stripe`}

@@ -19,16 +19,15 @@ import {
 } from '../../lib/jobPay';
 
 const DEFAULT_PLACE = {
-  address: '10 Downing Street, London',
-  latitude: 51.5074,
-  longitude: -0.1278,
+  address: '',
+  latitude: null,
+  longitude: null,
 };
 
 export default function ClientPage() {
   const router = useRouter();
   const user = useRequireRole(['client', 'business']);
   const [requests, setRequests] = useState([]);
-  const [notes, setNotes] = useState([]);
   const [businesses, setBusinesses] = useState([]);
   const [selectedBusinessId, setSelectedBusinessId] = useState('');
   const [error, setError] = useState('');
@@ -51,12 +50,8 @@ export default function ClientPage() {
   }, [user, router]);
 
   const load = useCallback(async () => {
-    const [mine, notifications] = await Promise.all([
-      api('/api/requests/mine'),
-      api('/api/notifications'),
-    ]);
+    const mine = await api('/api/requests/mine');
     setRequests(mine);
-    setNotes(notifications);
     if (user?.role === 'business') {
       const list = await api('/api/businesses');
       setBusinesses(list);
@@ -83,9 +78,11 @@ export default function ClientPage() {
   }, [user, load]);
 
   const placeSyncedForBiz = useRef('');
+  const placeEdited = useRef(false);
 
   useEffect(() => {
     if (user?.role !== 'business') return;
+    if (placeEdited.current) return;
     const active = businesses.find((b) => String(b._id) === String(selectedBusinessId));
     if (!active?.address) return;
     // Only seed the form when the selected business changes — not on every poll refresh.
@@ -181,6 +178,18 @@ export default function ClientPage() {
     }
   }
 
+  async function hide(id) {
+    setError('');
+    setMessage('');
+    try {
+      await api(`/api/requests/${id}/archive`, { method: 'POST' });
+      setMessage('Job archived. See Archived for the list.');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   async function updateRequest(id, currentDetails, opts = {}) {
     const rematch = Boolean(opts.rematch);
     const currentPay = opts.pay;
@@ -249,7 +258,7 @@ export default function ClientPage() {
   return (
     <div className="shell">
       <TopBar title={user.role === 'business' ? 'Business' : 'Client / Business'} />
-      <div className="grid grid-2">
+      <div className="grid grid-client-hub">
         <div className="card stack">
           <h2>Post a cleaning need</h2>
           {user.role === 'business' ? (
@@ -315,112 +324,122 @@ export default function ClientPage() {
                 </div>
               </>
             ) : null}
-            <LocationPicker value={place} onChange={setPlace} />
+            <LocationPicker
+              value={place}
+              onChange={(next) => {
+                placeEdited.current = true;
+                setPlace(next);
+              }}
+            />
             <button type="submit">Submit request</button>
           </form>
           {message ? <div className="success">{message}</div> : null}
           {error ? <div className="error">{error}</div> : null}
         </div>
 
-        <div className="card stack">
-          <h2>Notifications</h2>
-          <div className="list">
-            {notes.length === 0 ? <p className="muted">None yet.</p> : null}
-            {notes.slice(0, 8).map((n) => (
-              <div className="item" key={n._id}>
-                <strong>{n.title}</strong>
-                <div className="muted">{n.body}</div>
-              </div>
-            ))}
+        <div className="card stack requests-panel">
+          <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0 }}>My requests</h2>
+            <Link href="/client/archived" className="muted">
+              Archived jobs
+            </Link>
           </div>
-          {user.role === 'business' ? (
-            <p style={{ marginTop: 16 }}>
-              <Link href="/client/businesses/new">Add another business</Link>
-            </p>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="card stack" style={{ marginTop: 16 }}>
-        <h2>My requests</h2>
-        <div className="list">
-          {requests.map((r) => (
-            <div className="item stack" key={r._id}>
-              <div className="row">
-                <StatusBadge status={r.status} />
-                <span className="muted">
-                  Notified: {r.notifiedCleanerCount ?? 0}
-                </span>
-                {r.businessId?.name ? (
-                  <span className="muted">{r.businessId.name}</span>
-                ) : null}
-              </div>
-              <div>{r.serviceDetails}</div>
-              <div className="muted">{r.address}</div>
-              {r.scheduleStart && r.scheduleEnd ? (
-                <div className="muted">
-                  Window: {formatScheduleRange(r.scheduleStart, r.scheduleEnd)}
-                </div>
-              ) : r.preferredTime ? (
-                <div className="muted">
-                  Preferred: {new Date(r.preferredTime).toLocaleString()}
-                </div>
-              ) : null}
-              {r.pay ? (
-                <div className="muted">
-                  Pay: {formatPaySummary(r.pay)}
-                  {r.pay.paymentStatus === 'paid' ? ' · PAID' : ''}
-                </div>
-              ) : null}
-              {r.assignedCleanerId ? (
-                <div className="muted">
-                  Assigned: {r.assignedCleanerId.name || r.assignedCleanerId}
-                </div>
-              ) : null}
-              {r.status === 'open' || r.status === 'unmatched' ? (
+          <div className="list">
+            {requests.length === 0 ? <p className="muted">None yet.</p> : null}
+            {requests.map((r) => {
+              const isPaid = r.pay?.paymentStatus === 'paid';
+              return (
+              <div className="item stack" key={r._id}>
                 <div className="row">
-                  <button
-                    className="secondary"
-                    type="button"
-                    onClick={() =>
-                      updateRequest(r._id, r.serviceDetails, {
-                        rematch: r.status === 'unmatched',
-                        pay: r.pay,
-                      })
-                    }
-                  >
-                    {r.status === 'unmatched' ? 'Adjust & rematch' : 'Update'}
-                  </button>
-                  <button className="danger" type="button" onClick={() => cancel(r._id)}>
-                    Cancel
-                  </button>
-                  {r.pay && r.pay.paymentStatus !== 'paid' ? (
+                  <StatusBadge status={r.status} />
+                  <span className="muted">
+                    Notified: {r.notifiedCleanerCount ?? 0}
+                  </span>
+                  {r.businessId?.name ? (
+                    <span className="muted">{r.businessId.name}</span>
+                  ) : null}
+                </div>
+                <div>{r.serviceDetails}</div>
+                <div className="muted">{r.address}</div>
+                {r.scheduleStart && r.scheduleEnd ? (
+                  <div className="muted">
+                    Window: {formatScheduleRange(r.scheduleStart, r.scheduleEnd)}
+                  </div>
+                ) : r.preferredTime ? (
+                  <div className="muted">
+                    Preferred: {new Date(r.preferredTime).toLocaleString()}
+                  </div>
+                ) : null}
+                {r.pay ? (
+                  <div className="muted">
+                    Pay: {formatPaySummary(r.pay)}
+                    {isPaid ? ' · PAID' : ''}
+                  </div>
+                ) : null}
+                {r.assignedCleanerId ? (
+                  <div className="muted">
+                    Assigned: {r.assignedCleanerId.name || r.assignedCleanerId}
+                  </div>
+                ) : null}
+                {r.status === 'open' || r.status === 'unmatched' ? (
+                  <div className="row">
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() =>
+                        updateRequest(r._id, r.serviceDetails, {
+                          rematch: r.status === 'unmatched',
+                          pay: r.pay,
+                        })
+                      }
+                    >
+                      {r.status === 'unmatched' ? 'Adjust & rematch' : 'Update'}
+                    </button>
+                    {!isPaid ? (
+                      <button className="danger" type="button" onClick={() => cancel(r._id)}>
+                        Cancel
+                      </button>
+                    ) : (
+                      <button className="secondary" type="button" onClick={() => hide(r._id)}>
+                        Hide
+                      </button>
+                    )}
+                    {r.pay && !isPaid ? (
+                      <Link href={`/client/pay/${r._id}`}>
+                        <button type="button">Pay for Service</button>
+                      </Link>
+                    ) : null}
+                  </div>
+                ) : null}
+                {r.pay &&
+                !isPaid &&
+                r.status !== 'open' &&
+                r.status !== 'unmatched' &&
+                r.status !== 'cancelled' ? (
+                  <div className="row">
                     <Link href={`/client/pay/${r._id}`}>
                       <button type="button">Pay for Service</button>
                     </Link>
-                  ) : null}
-                </div>
-              ) : null}
-              {r.pay &&
-              r.pay.paymentStatus !== 'paid' &&
-              r.status !== 'open' &&
-              r.status !== 'unmatched' &&
-              r.status !== 'cancelled' ? (
-                <div className="row">
-                  <Link href={`/client/pay/${r._id}`}>
-                    <button type="button">Pay for Service</button>
-                  </Link>
-                </div>
-              ) : null}
-              {r.status === 'cancelled' ? (
-                <div className="row">
-                  <button className="danger" type="button" onClick={() => remove(r._id)}>
-                    Remove
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ))}
+                  </div>
+                ) : null}
+                {isPaid && r.status !== 'open' && r.status !== 'unmatched' ? (
+                  <div className="row">
+                    <button className="secondary" type="button" onClick={() => hide(r._id)}>
+                      Hide
+                    </button>
+                  </div>
+                ) : null}
+                {r.status === 'cancelled' ? (
+                  <div className="row">
+                    <button className="danger" type="button" onClick={() => remove(r._id)}>
+                      Remove
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

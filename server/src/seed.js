@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import { User } from './models/User.js';
 import { CleaningRequest } from './models/CleaningRequest.js';
 import { Notification } from './models/Notification.js';
+import { NotificationJob } from './models/NotificationJob.js';
+import { PushDevice } from './models/PushDevice.js';
 import { Business } from './models/Business.js';
 
 const password = 'password123';
@@ -29,6 +31,8 @@ export async function seedDemo({ reset = true } = {}) {
     await Promise.all([
       CleaningRequest.deleteMany({}),
       Notification.deleteMany({}),
+      NotificationJob.deleteMany({}),
+      PushDevice.deleteMany({}),
       Business.deleteMany({}),
       User.deleteMany({}),
     ]);

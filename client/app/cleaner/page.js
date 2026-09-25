@@ -22,20 +22,17 @@ export default function CleanerPage() {
   const [lng, setLng] = useState(HUB.lng + 0.01);
   const [offers, setOffers] = useState([]);
   const [assigned, setAssigned] = useState([]);
-  const [notes, setNotes] = useState([]);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
   const load = useCallback(async () => {
-    const [offerList, assignedList, notifications, me] = await Promise.all([
+    const [offerList, assignedList, me] = await Promise.all([
       api('/api/requests/offers'),
       api('/api/requests/assigned'),
-      api('/api/notifications'),
       api('/api/auth/me'),
     ]);
     setOffers(offerList);
     setAssigned(assignedList);
-    setNotes(notifications);
     setAvailable(Boolean(me.isAvailable));
     if (me.currentLocation?.lat != null) {
       setLat(me.currentLocation.lat);
@@ -110,45 +107,31 @@ export default function CleanerPage() {
   return (
     <div className="shell">
       <TopBar title="Cleaner" />
-      <div className="grid grid-2">
-        <div className="card stack">
-          <h2>Availability</h2>
-          <div className="row">
-            <StatusBadge status={available ? 'live' : 'unavailable'} />
-          </div>
-          <div className="row">
-            <label style={{ flex: 1 }}>
-              Lat
-              <input type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)} />
-            </label>
-            <label style={{ flex: 1 }}>
-              Lng
-              <input type="number" step="any" value={lng} onChange={(e) => setLng(e.target.value)} />
-            </label>
-          </div>
-          <div className="row">
-            <button type="button" onClick={() => setAvailability(true)}>
-              Go available
-            </button>
-            <button className="secondary" type="button" onClick={() => setAvailability(false)}>
-              Go unavailable
-            </button>
-          </div>
-          {message ? <div className="success">{message}</div> : null}
-          {error ? <div className="error">{error}</div> : null}
+      <div className="card stack">
+        <h2>Availability</h2>
+        <div className="row">
+          <StatusBadge status={available ? 'live' : 'unavailable'} />
         </div>
-
-        <div className="card stack">
-          <h2>Notifications</h2>
-          <div className="list">
-            {notes.slice(0, 6).map((n) => (
-              <div className="item" key={n._id}>
-                <strong>{n.title}</strong>
-                <div className="muted">{n.body}</div>
-              </div>
-            ))}
-          </div>
+        <div className="row">
+          <label style={{ flex: 1 }}>
+            Lat
+            <input type="number" step="any" value={lat} onChange={(e) => setLat(e.target.value)} />
+          </label>
+          <label style={{ flex: 1 }}>
+            Lng
+            <input type="number" step="any" value={lng} onChange={(e) => setLng(e.target.value)} />
+          </label>
         </div>
+        <div className="row">
+          <button type="button" onClick={() => setAvailability(true)}>
+            Go available
+          </button>
+          <button className="secondary" type="button" onClick={() => setAvailability(false)}>
+            Go unavailable
+          </button>
+        </div>
+        {message ? <div className="success">{message}</div> : null}
+        {error ? <div className="error">{error}</div> : null}
       </div>
 
       <div className="card stack" style={{ marginTop: 16 }}>

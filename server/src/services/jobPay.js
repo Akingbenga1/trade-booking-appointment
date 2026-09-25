@@ -1,4 +1,5 @@
-import { CleaningJobPay } from '../models/CleaningJobPay.js';
+import { BusinessPayment } from '../models/BusinessPayment.js';
+import { Transaction } from '../models/Transaction.js';
 
 /** UK NMW floor used by this product (£/hour). */
 export const MINIMUM_WAGE_PER_HOUR = 12.71;
@@ -107,20 +108,35 @@ export function parseJobPay(payRatePerHour, scheduleStart, scheduleEnd) {
   };
 }
 
-export function payToPublic(doc) {
-  if (!doc) return null;
-  const o = typeof doc.toObject === 'function' ? doc.toObject() : doc;
+/** Build the public `pay` shape from ownership + transaction rows. */
+export function payToPublic(businessPayment, transaction) {
+  if (!businessPayment && !transaction) return null;
+  const bp =
+    businessPayment && typeof businessPayment.toObject === 'function'
+      ? businessPayment.toObject()
+      : businessPayment || {};
+  const tx =
+    transaction && typeof transaction.toObject === 'function'
+      ? transaction.toObject()
+      : transaction || {};
+
   return {
-    payRatePerHour: o.payRatePerHour,
-    currency: o.currency,
-    minimumWagePerHour: o.minimumWagePerHour,
-    durationHours: o.durationHours,
-    totalAmount: o.totalAmount,
-    paymentStatus: o.paymentStatus || 'unpaid',
-    paidAt: o.paidAt || null,
+    payRatePerHour: bp.payRatePerHour,
+    currency: tx.currency || 'GBP',
+    minimumWagePerHour: bp.minimumWagePerHour,
+    durationHours: bp.durationHours,
+    totalAmount: tx.amount,
+    paymentStatus: tx.status || 'unpaid',
+    paidAt: tx.paidAt || null,
+    providerId: tx.providerPaymentId || tx.providerCheckoutSessionId || null,
+    receiptUrl: tx.receiptUrl || null,
   };
 }
 
+/**
+ * Create unpaid transaction + business ownership for a new business request.
+ * @returns {{ businessPayment: object, transaction: object }}
+ */
 export async function createJobPayForRequest({
   requestId,
   businessId,
@@ -129,21 +145,32 @@ export async function createJobPayForRequest({
   scheduleEnd,
 }) {
   const fields = parseJobPay(payRatePerHour, scheduleStart, scheduleEnd);
-  return CleaningJobPay.create({
+  const transaction = await Transaction.create({
     requestId,
-    businessId,
-    ...fields,
+    amount: fields.totalAmount,
+    currency: fields.currency,
+    status: 'unpaid',
   });
+  const businessPayment = await BusinessPayment.create({
+    businessId,
+    requestId,
+    transactionId: transaction._id,
+    payRatePerHour: fields.payRatePerHour,
+    minimumWagePerHour: fields.minimumWagePerHour,
+    durationHours: fields.durationHours,
+  });
+  return { businessPayment, transaction };
 }
 
 /**
  * Upsert pay for a business request when rate and/or schedule changes.
  * If payRatePerHour is omitted, keeps the existing rate and recalculates duration/total.
+ * @returns {{ businessPayment: object, transaction: object } | null}
  */
 export async function syncJobPayForRequest(request, { payRatePerHour } = {}) {
   if (!request.businessId) return null;
 
-  const existing = await CleaningJobPay.findOne({ requestId: request._id });
+  const existing = await BusinessPayment.findOne({ requestId: request._id });
   const rate =
     payRatePerHour != null && payRatePerHour !== ''
       ? payRatePerHour
@@ -159,29 +186,49 @@ export async function syncJobPayForRequest(request, { payRatePerHour } = {}) {
 
   if (existing) {
     existing.payRatePerHour = fields.payRatePerHour;
-    existing.currency = fields.currency;
     existing.minimumWagePerHour = fields.minimumWagePerHour;
     existing.durationHours = fields.durationHours;
-    existing.totalAmount = fields.totalAmount;
     await existing.save();
-    return existing;
+
+    const transaction = await Transaction.findById(existing.transactionId);
+    if (transaction && transaction.status !== 'paid') {
+      transaction.amount = fields.totalAmount;
+      transaction.currency = fields.currency;
+      await transaction.save();
+    }
+    return { businessPayment: existing, transaction };
   }
 
-  return CleaningJobPay.create({
+  return createJobPayForRequest({
     requestId: request._id,
     businessId: request.businessId,
-    ...fields,
+    payRatePerHour: rate,
+    scheduleStart: request.scheduleStart,
+    scheduleEnd: request.scheduleEnd,
   });
 }
 
 export async function findPayByRequestId(requestId) {
-  return CleaningJobPay.findOne({ requestId });
+  const businessPayment = await BusinessPayment.findOne({ requestId });
+  if (!businessPayment) return null;
+  const transaction = await Transaction.findById(businessPayment.transactionId);
+  return { businessPayment, transaction };
 }
 
 export async function findPayByRequestIds(requestIds) {
   if (!requestIds?.length) return new Map();
-  const rows = await CleaningJobPay.find({ requestId: { $in: requestIds } });
-  return new Map(rows.map((r) => [String(r.requestId), r]));
+  const ownership = await BusinessPayment.find({ requestId: { $in: requestIds } });
+  const txIds = ownership.map((o) => o.transactionId).filter(Boolean);
+  const transactions = txIds.length
+    ? await Transaction.find({ _id: { $in: txIds } })
+    : [];
+  const txById = new Map(transactions.map((t) => [String(t._id), t]));
+  return new Map(
+    ownership.map((bp) => [
+      String(bp.requestId),
+      { businessPayment: bp, transaction: txById.get(String(bp.transactionId)) || null },
+    ])
+  );
 }
 
 /** Attach public `pay` onto plain request object(s). Mutates and returns same shape. */
@@ -190,19 +237,14 @@ export async function attachPayToRequests(docs) {
   const list = single ? [docs] : docs;
   if (!list.length || !list[0]) return docs;
 
-  const ids = list
-    .map((d) => d?._id || d?.id)
-    .filter(Boolean);
+  const ids = list.map((d) => d?._id || d?.id).filter(Boolean);
   const byId = await findPayByRequestIds(ids);
 
   for (const doc of list) {
     if (!doc) continue;
     const id = String(doc._id || doc.id);
-    const pay = byId.get(id);
-    if (typeof doc.toObject === 'function') {
-      // leave mongoose doc alone; callers usually use plain objects
-    }
-    doc.pay = payToPublic(pay);
+    const pair = byId.get(id);
+    doc.pay = payToPublic(pair?.businessPayment, pair?.transaction);
   }
   return single ? list[0] : list;
 }

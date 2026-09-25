@@ -18,15 +18,18 @@ export const config = {
     pass: process.env.MAILTRAP_PASS || '',
     from: process.env.MAIL_FROM || 'noreply@trade-booking.local',
   },
-  opencageApiKey: process.env.OPENCAGE_API_KEY || '',
-  // When set, geocode returns fixed coords (local/tests without OpenCage).
-  opencageStub: process.env.OPENCAGE_STUB === '1',
-  // Nominatim places proxy stub (local/tests). Also on when OPENCAGE_STUB=1.
-  placesStub: process.env.PLACES_STUB === '1' || process.env.OPENCAGE_STUB === '1',
   magicLinkTtlMinutes: Number(process.env.MAGIC_LINK_TTL_MINUTES || 60),
   stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
-  // Local/demo checkout UI when no Stripe key (or STRIPE_STUB=1).
-  stripeStub:
-    process.env.STRIPE_STUB === '1' ||
-    (!process.env.STRIPE_SECRET_KEY && process.env.STRIPE_STUB !== '0'),
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
+  // FCM (web + Android). Private key may contain escaped newlines in .env.
+  fcm: {
+    projectId: process.env.FCM_PROJECT_ID || '',
+    clientEmail: process.env.FCM_CLIENT_EMAIL || '',
+    privateKey: (process.env.FCM_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+  },
+  notify: {
+    // Booking email only if live+push missed after this window (seconds).
+    emailFallbackSeconds: Number(process.env.NOTIFY_EMAIL_FALLBACK_SECONDS || 120),
+    maxAttempts: Number(process.env.NOTIFY_MAX_ATTEMPTS || 5),
+  },
 };

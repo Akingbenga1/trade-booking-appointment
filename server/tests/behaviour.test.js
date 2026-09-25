@@ -8,13 +8,15 @@ import { User } from '../src/models/User.js';
 import { CleaningRequest } from '../src/models/CleaningRequest.js';
 import { Notification } from '../src/models/Notification.js';
 import { Business } from '../src/models/Business.js';
-import { CleaningJobPay } from '../src/models/CleaningJobPay.js';
+import { BusinessPayment } from '../src/models/BusinessPayment.js';
+import { Transaction } from '../src/models/Transaction.js';
 import {
   createCleaningRequest,
   respondToOffer,
   advanceBooking,
   cancelRequest,
   removeCancelledRequest,
+  archiveRequest,
   forceAssign,
   processExpiries,
 } from '../src/services/requestService.js';
@@ -51,17 +53,16 @@ describe('system-behviour.md core rules', () => {
     // Real MongoDB only — uses a dedicated test database
     process.env.MONGO_URI =
       process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/trade_booking_test';
-    process.env.OPENCAGE_STUB = '1';
     delete process.env.MEMORY_MONGO;
     config.mongoUri = process.env.MONGO_URI;
-    config.opencageStub = true;
     await connectDb();
     await Promise.all([
       User.deleteMany({}),
       CleaningRequest.deleteMany({}),
       Notification.deleteMany({}),
       Business.deleteMany({}),
-      CleaningJobPay.deleteMany({}),
+      BusinessPayment.deleteMany({}),
+      Transaction.deleteMany({}),
     ]);
 
     client = await makeUser({ name: 'Client', email: 't-client@test.com', role: 'client' });
@@ -343,9 +344,13 @@ describe('system-behviour.md core rules', () => {
     // 8h/day × 2 days
     assert.equal(req.pay.durationHours, 16);
     assert.equal(req.pay.totalAmount, Math.round(12.71 * 16 * 100) / 100);
-    const payRow = await CleaningJobPay.findOne({ requestId: req._id });
-    assert.ok(payRow);
-    assert.equal(String(payRow.businessId), String(business._id));
+    const ownership = await BusinessPayment.findOne({ requestId: req._id });
+    assert.ok(ownership);
+    assert.equal(String(ownership.businessId), String(business._id));
+    const tx = await Transaction.findById(ownership.transactionId);
+    assert.ok(tx);
+    assert.equal(tx.amount, req.pay.totalAmount);
+    assert.equal(tx.status, 'unpaid');
 
     await assert.rejects(
       () =>
@@ -363,5 +368,58 @@ describe('system-behviour.md core rules', () => {
 
     await cancelRequest(req._id, { id: user._id.toString(), role: 'business' });
     assert.equal((await CleaningRequest.findById(req._id)).status, 'cancelled');
+  });
+
+  it('paid jobs cannot be cancelled; they can be archived (hidden)', async () => {
+    const user = await makeUser({
+      name: 'Biz Paid',
+      email: 'biz-paid-archive@test.com',
+      role: 'business',
+    });
+    const business = await Business.create({
+      name: 'Paid Archive Co',
+      phone: '07000000099',
+      address: '1 Archive St',
+      latitude: hub.lat,
+      longitude: hub.lng,
+      memberIds: [user._id],
+      createdBy: user._id,
+    });
+    const scheduleStart = new Date('2030-06-01T09:00:00.000Z');
+    const scheduleEnd = new Date('2030-06-02T17:00:00.000Z');
+    const req = await createCleaningRequest({
+      clientId: user._id,
+      businessId: business._id,
+      serviceDetails: 'Paid then hide',
+      scheduleStart,
+      scheduleEnd,
+      address: 'Biz site',
+      latitude: hub.lat,
+      longitude: hub.lng,
+      payRatePerHour: 12.71,
+    });
+    const ownership = await BusinessPayment.findOne({ requestId: req._id });
+    const tx = await Transaction.findById(ownership.transactionId);
+    tx.status = 'paid';
+    tx.paidAt = new Date();
+    await tx.save();
+
+    await assert.rejects(
+      () => cancelRequest(req._id, { id: user._id.toString(), role: 'business' }),
+      (err) => err.status === 409 && /paid/i.test(err.message)
+    );
+    assert.equal((await CleaningRequest.findById(req._id)).status, 'open');
+
+    const archived = await archiveRequest(req._id, {
+      id: user._id.toString(),
+      role: 'business',
+    });
+    assert.ok(archived.archivedAt);
+    assert.equal((await CleaningRequest.findById(req._id)).status, 'open');
+
+    await assert.rejects(
+      () => archiveRequest(req._id, { id: user._id.toString(), role: 'business' }),
+      (err) => err.status === 404
+    );
   });
 });

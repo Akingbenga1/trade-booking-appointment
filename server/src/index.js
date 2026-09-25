@@ -14,10 +14,31 @@ import notificationRoutes from './routes/notifications.js';
 import businessRoutes from './routes/businesses.js';
 import placesRoutes from './routes/places.js';
 import paymentRoutes from './routes/payments.js';
+import { handleStripeWebhook } from './services/paymentService.js';
 import { startEmailQueueWorker } from './services/emailQueue.js';
+import { startDeliveryQueueWorker } from './services/deliveryQueue.js';
+import { attachRealtime } from './services/realtime.js';
 
 const app = express();
 app.use(cors({ origin: config.clientOrigin, credentials: true }));
+
+// Stripe needs the raw body for signature verification — mount before json parser.
+app.post(
+  '/api/payments/webhook',
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    try {
+      const result = await handleStripeWebhook(
+        req.body,
+        req.headers['stripe-signature']
+      );
+      res.json(result);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
 app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
@@ -57,6 +78,7 @@ export async function startServer() {
   }
 
   startEmailQueueWorker();
+  startDeliveryQueueWorker();
 
   setInterval(() => {
     processExpiries().catch((e) => console.error('expiry job', e.message));
@@ -64,6 +86,7 @@ export async function startServer() {
 
   return new Promise((resolve) => {
     const server = app.listen(config.port, () => {
+      attachRealtime(server);
       console.log(`API listening on http://localhost:${config.port}`);
       resolve(server);
     });

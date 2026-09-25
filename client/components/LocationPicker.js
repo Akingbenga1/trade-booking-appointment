@@ -81,7 +81,7 @@ export default function LocationPicker({
         ? [Number(value.latitude), Number(value.longitude)]
         : [DEFAULT_CENTER.latitude, DEFAULT_CENTER.longitude];
 
-      const map = L.map(mapRef.current).setView(center, hasPin ? 15 : 11);
+      const map = L.map(mapRef.current).setView(center, hasPin ? 17 : 13);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap',
         maxZoom: 19,
@@ -137,7 +137,7 @@ export default function LocationPicker({
     } else {
       markerRef.current.setLatLng(latlng);
     }
-    map.setView(latlng, Math.max(map.getZoom(), 15));
+    map.setView(latlng, Math.max(map.getZoom(), 17));
   }, [value?.latitude, value?.longitude, hasPin]);
 
   useEffect(() => {
@@ -157,8 +157,10 @@ export default function LocationPicker({
       try {
         const results = await api(`/api/places/search?q=${encodeURIComponent(q)}`);
         setSuggestions(results);
-      } catch {
+        setHint('');
+      } catch (err) {
         setSuggestions([]);
+        setHint(err.message || 'Address search failed');
       } finally {
         setSearching(false);
       }
@@ -216,6 +218,9 @@ export default function LocationPicker({
       ) : null}
       {hint ? <p className="muted">{hint}</p> : null}
       <div className="map-frame" ref={mapRef} />
+      {hasPin ? (
+        <p className="muted">Change the address text to see new suggestions.</p>
+      ) : null}
       <p className="muted">Drag the pin to fine-tune; the address updates from the new spot.</p>
     </div>
   );

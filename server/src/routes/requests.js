@@ -7,14 +7,25 @@ import {
   advanceBooking,
   cancelRequest,
   removeCancelledRequest,
+  archiveRequest,
   updateOpenRequest,
   notDeletedFilter,
+  activeForPosterFilter,
 } from '../services/requestService.js';
 import { isBusinessMember, listBusinessesForUser } from '../services/businessService.js';
 import { attachPayToRequests } from '../services/jobPay.js';
 import { parsePlaceFields } from '../services/place.js';
 
 const router = Router();
+
+async function posterOwnershipFilter(user) {
+  if (user.role === 'business') {
+    const businesses = await listBusinessesForUser(user.id);
+    const ids = businesses.map((b) => b._id);
+    return { businessId: { $in: ids } };
+  }
+  return { clientId: user.id };
+}
 
 router.post('/', requireAuth, requireRole('client', 'business'), async (req, res) => {
   try {
@@ -65,16 +76,24 @@ router.post('/', requireAuth, requireRole('client', 'business'), async (req, res
 });
 
 router.get('/mine', requireAuth, requireRole('client', 'business'), async (req, res) => {
-  let filter;
-  if (req.user.role === 'business') {
-    const businesses = await listBusinessesForUser(req.user.id);
-    const ids = businesses.map((b) => b._id);
-    filter = { businessId: { $in: ids } };
-  } else {
-    filter = { clientId: req.user.id };
-  }
-  const list = await CleaningRequest.find({ ...filter, ...notDeletedFilter })
+  const filter = await posterOwnershipFilter(req.user);
+  const list = await CleaningRequest.find({ ...filter, ...activeForPosterFilter })
     .sort({ createdAt: -1 })
+    .populate('assignedCleanerId', 'name email')
+    .populate('businessId', 'name');
+  const plain = list.map((d) => d.toObject());
+  await attachPayToRequests(plain);
+  res.json(plain);
+});
+
+router.get('/archived', requireAuth, requireRole('client', 'business'), async (req, res) => {
+  const filter = await posterOwnershipFilter(req.user);
+  const list = await CleaningRequest.find({
+    ...filter,
+    deletedAt: null,
+    archivedAt: { $ne: null },
+  })
+    .sort({ archivedAt: -1 })
     .populate('assignedCleanerId', 'name email')
     .populate('businessId', 'name');
   const plain = list.map((d) => d.toObject());
@@ -232,6 +251,15 @@ router.post('/:id/cancel', requireAuth, requireRole('client', 'business', 'admin
 router.post('/:id/remove', requireAuth, requireRole('client', 'business', 'admin'), async (req, res) => {
   try {
     const request = await removeCancelledRequest(req.params.id, req.user);
+    res.json(request);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/archive', requireAuth, requireRole('client', 'business', 'admin'), async (req, res) => {
+  try {
+    const request = await archiveRequest(req.params.id, req.user);
     res.json(request);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });

@@ -1,7 +1,5 @@
-import { config } from '../config.js';
-
 const NOMINATIM = 'https://nominatim.openstreetmap.org';
-const USER_AGENT = 'trade-booking-appointment/1.0 (local-dev; places-proxy)';
+const USER_AGENT = 'trade-booking-appointment/1.0 (places-proxy)';
 
 /**
  * Address autocomplete via Nominatim (OpenStreetMap) — same stack as Leaflet OSM tiles.
@@ -11,17 +9,6 @@ const USER_AGENT = 'trade-booking-appointment/1.0 (local-dev; places-proxy)';
 export async function searchPlaces(query) {
   const q = String(query || '').trim();
   if (q.length < 2) return [];
-
-  if (config.placesStub) {
-    return [
-      {
-        label: `${q} (stub)`,
-        address: q,
-        latitude: 51.5074,
-        longitude: -0.1278,
-      },
-    ];
-  }
 
   const url = new URL(`${NOMINATIM}/search`);
   url.searchParams.set('q', q);
@@ -60,14 +47,6 @@ export async function reverseGeocode(latitude, longitude) {
     const err = new Error('latitude and longitude required');
     err.status = 400;
     throw err;
-  }
-
-  if (config.placesStub) {
-    return {
-      address: `Pinned location (${lat.toFixed(5)}, ${lng.toFixed(5)})`,
-      latitude: lat,
-      longitude: lng,
-    };
   }
 
   const url = new URL(`${NOMINATIM}/reverse`);

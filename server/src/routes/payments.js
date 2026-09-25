@@ -4,9 +4,27 @@ import {
   confirmCheckoutPayment,
   createCheckoutSession,
   getPaymentForRequest,
+  listBusinessTransactions,
 } from '../services/paymentService.js';
 
 const router = Router();
+
+router.get(
+  '/transactions',
+  requireAuth,
+  requireRole('business'),
+  async (req, res) => {
+    try {
+      const list = await listBusinessTransactions(
+        req.user,
+        req.query.businessId || req.query.business_id
+      );
+      res.json(list);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
 
 router.get(
   '/request/:requestId',
@@ -36,6 +54,7 @@ router.post(
   }
 );
 
+/** Browser return backup; remove once webhooks are trusted. */
 router.post(
   '/confirm/:requestId',
   requireAuth,

@@ -17,3 +17,6 @@ project-requirement.md
 quick-update.md
 client/.env.local
 
+# Local behaviour notes — not committed.
+System-Behaviour/
+
