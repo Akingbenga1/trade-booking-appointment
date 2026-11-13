@@ -193,7 +193,10 @@ router.get('/assigned', requireAuth, requireRole('cleaner', 'agency_staff'), asy
       ...notDeletedFilter,
       _id: { $in: ids },
       status: { $in: ['assigned', 'en_route', 'on_site', 'in_progress', 'completed'] },
-    }).sort({ updatedAt: -1 });
+    })
+      .populate('clientId', 'name')
+      .populate('businessId', 'name')
+      .sort({ updatedAt: -1 });
     const plain = [];
     for (const d of list) {
       const h = await hydrateRequest(d);
@@ -207,7 +210,10 @@ router.get('/assigned', requireAuth, requireRole('cleaner', 'agency_staff'), asy
     ...notDeletedFilter,
     assignedCleanerId: req.user.id,
     status: { $in: ['assigned', 'en_route', 'on_site', 'in_progress', 'completed'] },
-  }).sort({ updatedAt: -1 });
+  })
+    .populate('clientId', 'name')
+    .populate('businessId', 'name')
+    .sort({ updatedAt: -1 });
   const plain = [];
   for (const d of list) {
     plain.push(await hydrateRequest(d));

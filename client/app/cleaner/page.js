@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { api } from '../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../components/ui';
 import { formatScheduleRange } from '../../components/DateTimeRangePicker';
@@ -8,12 +9,6 @@ import JobMap from '../../components/JobMap';
 import { formatPaySummary } from '../../lib/jobPay';
 
 const HUB = { lat: 51.5074, lng: -0.1278 };
-const NEXT_STEP = {
-  assigned: 'en_route',
-  en_route: 'on_site',
-  on_site: 'in_progress',
-  in_progress: 'completed',
-};
 
 export default function CleanerPage() {
   const user = useRequireRole(['cleaner', 'agency_staff']);
@@ -91,34 +86,6 @@ export default function CleanerPage() {
             ? 'Rejected — others may still take it.'
             : 'Ignored.'
       );
-      await load();
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  async function progress(id, status) {
-    setError('');
-    try {
-      await api(`/api/requests/${id}/progress`, {
-        method: 'POST',
-        body: { status },
-      });
-      await load();
-    } catch (err) {
-      setError(err.message);
-    }
-  }
-
-  async function staffRespond(id, action) {
-    setError('');
-    setMessage('');
-    try {
-      await api(`/api/requests/${id}/staff-respond`, {
-        method: 'POST',
-        body: { action },
-      });
-      setMessage(action === 'confirm' ? 'Confirmed.' : 'Declined.');
       await load();
     } catch (err) {
       setError(err.message);
@@ -207,47 +174,20 @@ export default function CleanerPage() {
 
       <div className="grid grid-2" style={{ marginTop: 16 }}>
         <div className="card stack">
-          <h2>Assigned jobs</h2>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Assigned jobs</h2>
+            <Link href="/cleaner/jobs">all assigned jobs</Link>
+          </div>
+          <p className="muted">
+            {assigned.length === 0
+              ? 'No assigned jobs.'
+              : `${assigned.length} assigned ${assigned.length === 1 ? 'job' : 'jobs'}. Open the list to update them.`}
+          </p>
           <div className="list">
-            {assigned.map((r) => (
-              <div className="item stack" key={r._id}>
+            {assigned.slice(0, 3).map((r) => (
+              <div className="item row" key={r._id}>
                 <StatusBadge status={r.status} />
-                <div>{r.serviceDetails}</div>
-                <JobMap
-                  address={r.address}
-                  latitude={r.latitude}
-                  longitude={r.longitude}
-                />
-                {r.scheduleStart && r.scheduleEnd ? (
-                  <div className="muted">
-                    Window: {formatScheduleRange(r.scheduleStart, r.scheduleEnd)}
-                  </div>
-                ) : null}
-                {r.pay ? (
-                  <div className="muted">Pay: {formatPaySummary(r.pay)}</div>
-                ) : null}
-                {isStaff && r.myAssignment?.confirmStatus === 'pending' ? (
-                  <>
-                  <div>Your agency assigned you this job. Confirm or decline.</div>
-                  <div className="row">
-                    <button type="button" onClick={() => staffRespond(r._id, 'confirm')}>
-                      Confirm assignment
-                    </button>
-                    <button
-                      className="secondary"
-                      type="button"
-                      onClick={() => staffRespond(r._id, 'decline')}
-                    >
-                      Decline
-                    </button>
-                  </div>
-                  </>
-                ) : null}
-                {!isStaff && NEXT_STEP[r.status] ? (
-                  <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>
-                    Mark {NEXT_STEP[r.status].replaceAll('_', ' ')}
-                  </button>
-                ) : null}
+                <span>{r.serviceDetails}</span>
               </div>
             ))}
           </div>
