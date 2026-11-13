@@ -23,9 +23,16 @@ import {
   attachPayToRequests,
   createJobPayForRequest,
   MINIMUM_WAGE_PER_HOUR,
-  parseJobPay,
+  quoteHourlyPay,
   syncJobPayForRequest,
 } from './jobPay.js';
+import {
+  assertHoursFit,
+  buildJobSchedule,
+  jobHourBudget,
+  parseAllocatedHours,
+  roundHours,
+} from './jobHours.js';
 import { listRequestEvents, recordRequestEvent } from './requestEvents.js';
 
 /** Mongo filter: exclude soft-deleted requests. */
@@ -159,6 +166,19 @@ async function clearStaffPay(assignmentId) {
   await StaffJobPay.deleteOne({ assignmentId });
 }
 
+async function allocatedHoursForRequest(requestId) {
+  const active = await JobAssignment.find({
+    requestId,
+    confirmStatus: { $in: ['pending', 'confirmed'] },
+  }).select('_id');
+  const ids = new Set(active.map((row) => String(row._id)));
+  const pays = await StaffJobPay.find({ requestId }).select('assignmentId durationHours');
+  const used = pays
+    .filter((row) => ids.has(String(row.assignmentId)))
+    .reduce((sum, row) => sum + Number(row.durationHours || 0), 0);
+  return roundHours(used);
+}
+
 async function notifyAgencyOwners(agencyIds, payload) {
   const userIds = [];
   for (const agencyId of agencyIds) {
@@ -195,12 +215,22 @@ export async function hydrateRequest(
   }).lean();
   const payByAssignment = new Map(pays.map((row) => [String(row.assignmentId), row]));
   let crewPayTotal = 0;
+  let hoursAllocated = 0;
   plain.assignments = assignments.map((row) => {
     const pay = staffPayView(payByAssignment.get(String(row._id)));
-    if (pay) crewPayTotal += pay.totalAmount;
+    if (pay) {
+      crewPayTotal += pay.totalAmount;
+      hoursAllocated += Number(pay.durationHours) || 0;
+    }
     return { ...row, pay };
   });
   plain.crewPayTotal = Math.round(crewPayTotal * 100) / 100;
+  plain.hourBudget = jobHourBudget(plain);
+  plain.hoursAllocated = roundHours(hoursAllocated);
+  plain.hoursRemaining =
+    plain.hourBudget == null
+      ? null
+      : roundHours(Math.max(0, plain.hourBudget - plain.hoursAllocated));
   if (plain.assignedAgencyId) {
     plain.assignedAgency =
       (await CleaningAgency.findById(plain.assignedAgencyId).select('name phone').lean()) || null;
@@ -219,8 +249,28 @@ export async function createCleaningRequest({
   latitude,
   longitude,
   payRatePerHour,
+  jobType,
+  durationDays,
+  durationExtraHours,
+  recurrenceUntil,
 }) {
-  const schedule = parseScheduleRange(scheduleStart, scheduleEnd);
+  let jobShape = null;
+  let schedule;
+  if (businessId && jobType) {
+    jobShape = buildJobSchedule({
+      jobType,
+      durationDays,
+      durationExtraHours,
+      scheduleStart,
+      recurrenceUntil,
+    });
+    schedule = {
+      scheduleStart: jobShape.scheduleStart,
+      scheduleEnd: jobShape.scheduleEnd,
+    };
+  } else {
+    schedule = parseScheduleRange(scheduleStart, scheduleEnd);
+  }
   const now = new Date();
   const matchingExpiresAt = new Date(now.getTime() + config.matchingWindowSeconds * 1000);
   const offerExpiresAt = matchingExpiresAt;
@@ -235,6 +285,17 @@ export async function createCleaningRequest({
     serviceDetails,
     scheduleStart: schedule.scheduleStart,
     scheduleEnd: schedule.scheduleEnd,
+    ...(jobShape
+      ? {
+          jobType: jobShape.jobType,
+          durationDays: jobShape.durationDays,
+          durationExtraHours: jobShape.durationExtraHours,
+          visitHours: jobShape.visitHours,
+          visitCount: jobShape.visitCount,
+          totalHours: jobShape.totalHours,
+          recurrenceUntil: jobShape.recurrenceUntil,
+        }
+      : {}),
     address,
     latitude,
     longitude,
@@ -263,6 +324,7 @@ export async function createCleaningRequest({
         payRatePerHour,
         scheduleStart: schedule.scheduleStart,
         scheduleEnd: schedule.scheduleEnd,
+        durationHours: jobShape ? jobShape.totalHours : undefined,
       });
     } catch (err) {
       await RequestOffer.deleteMany({ requestId: request._id });
@@ -643,7 +705,7 @@ export async function assignAgencyStaff(
   requestId,
   agencyId,
   actorUserId,
-  { staffUserId, payRatePerHour }
+  { staffUserId, payRatePerHour, allocatedHours, allocatedDays }
 ) {
   if (!(await isAgencyOwnerOrAdmin(actorUserId, agencyId))) {
     const err = new Error('Forbidden');
@@ -673,11 +735,10 @@ export async function assignAgencyStaff(
     throw err;
   }
 
-  const payFields = parseJobPay(
-    payRatePerHour,
-    request.scheduleStart,
-    request.scheduleEnd
-  );
+  const hours = parseAllocatedHours({ allocatedHours, allocatedDays });
+  const used = await allocatedHoursForRequest(requestId);
+  assertHoursFit(jobHourBudget(request), used, hours);
+  const payFields = quoteHourlyPay(payRatePerHour, hours);
   if (payFields.payRatePerHour < MINIMUM_WAGE_PER_HOUR) {
     const err = new Error(`Staff pay must be at least £${MINIMUM_WAGE_PER_HOUR} / hour`);
     err.status = 400;
@@ -754,13 +815,25 @@ export async function assignAgencyStaffMany(requestId, agencyId, actorUserId, st
       err.status = 400;
       throw err;
     }
+    parseAllocatedHours(row);
   }
+
+  const request = await CleaningRequest.findById(requestId);
+  if (!request) {
+    const err = new Error('Request not found');
+    err.status = 404;
+    throw err;
+  }
+  const incoming = staff.reduce((sum, row) => sum + parseAllocatedHours(row), 0);
+  const used = await allocatedHoursForRequest(requestId);
+  assertHoursFit(jobHourBudget(request), used, incoming);
 
   let latest = null;
   for (const row of staff) {
     latest = await assignAgencyStaff(requestId, agencyId, actorUserId, {
       staffUserId: row.staffUserId,
       payRatePerHour: row.payRatePerHour,
+      allocatedHours: parseAllocatedHours(row),
     });
   }
   return latest;
@@ -831,7 +904,7 @@ export async function reassignAgencyStaff(
   requestId,
   agencyId,
   actorUserId,
-  { fromStaffUserId, toStaffUserId, payRatePerHour }
+  { fromStaffUserId, toStaffUserId, payRatePerHour, allocatedHours, allocatedDays }
 ) {
   if (!(await isAgencyOwnerOrAdmin(actorUserId, agencyId))) {
     const err = new Error('Forbidden');
@@ -886,6 +959,8 @@ export async function reassignAgencyStaff(
   return assignAgencyStaff(requestId, agencyId, actorUserId, {
     staffUserId: toStaffUserId,
     payRatePerHour,
+    allocatedHours,
+    allocatedDays,
   });
 }
 

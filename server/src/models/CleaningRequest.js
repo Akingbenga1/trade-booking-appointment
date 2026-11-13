@@ -12,6 +12,17 @@ const cleaningRequestSchema = new mongoose.Schema(
     serviceDetails: { type: String, required: true },
     scheduleStart: { type: Date, required: true },
     scheduleEnd: { type: Date, required: true },
+    // Business job size. 1 day = 8 hours. Personal jobs leave these empty and use the schedule window.
+    jobType: {
+      type: String,
+      enum: ['fixed', 'recurring_indefinite', 'recurring_until'],
+    },
+    durationDays: Number,
+    durationExtraHours: Number,
+    visitHours: Number,
+    visitCount: Number,
+    totalHours: Number,
+    recurrenceUntil: Date,
     preferredTime: { type: Date, required: false },
     address: { type: String, required: true },
     latitude: { type: Number, required: true },

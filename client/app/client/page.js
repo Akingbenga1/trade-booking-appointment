@@ -11,12 +11,8 @@ import {
   formatScheduleRange,
 } from '../../components/DateTimeRangePicker';
 import LocationPicker from '../../components/LocationPicker';
-import {
-  MINIMUM_WAGE_PER_HOUR,
-  computePayPreview,
-  formatGbp,
-  formatPaySummary,
-} from '../../lib/jobPay';
+import { MINIMUM_WAGE_PER_HOUR, formatGbp, formatPaySummary } from '../../lib/jobPay';
+import { describeJob, previewBusinessJob } from '../../lib/jobHours';
 import { hasPlacePin } from '../../lib/place';
 
 const DEFAULT_PLACE = {
@@ -24,6 +20,20 @@ const DEFAULT_PLACE = {
   latitude: null,
   longitude: null,
 };
+
+const JOB_TYPES = [
+  ['fixed', 'Days and hours'],
+  ['recurring_indefinite', 'Repeats with no end'],
+  ['recurring_until', 'Repeats until a date'],
+];
+
+function tomorrowAtNine() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  d.setHours(9, 0, 0, 0);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 export default function ClientPage() {
   const router = useRouter();
@@ -37,11 +47,23 @@ export default function ClientPage() {
   const [payRatePerHour, setPayRatePerHour] = useState(String(MINIMUM_WAGE_PER_HOUR));
   const [serviceDetails, setServiceDetails] = useState('Office deep clean tomorrow');
   const [place, setPlace] = useState(DEFAULT_PLACE);
+  const [jobType, setJobType] = useState('fixed');
+  const [durationDays, setDurationDays] = useState('1');
+  const [durationExtraHours, setDurationExtraHours] = useState('0');
+  const [startsAt, setStartsAt] = useState(tomorrowAtNine);
+  const [untilDate, setUntilDate] = useState('');
 
-  const payPreview = useMemo(
+  const businessPreview = useMemo(
     () =>
-      computePayPreview(payRatePerHour, schedule.scheduleStart, schedule.scheduleEnd),
-    [payRatePerHour, schedule.scheduleStart, schedule.scheduleEnd]
+      previewBusinessJob({
+        jobType,
+        durationDays,
+        durationExtraHours,
+        startsAt,
+        untilDate,
+        payRatePerHour,
+      }),
+    [jobType, durationDays, durationExtraHours, startsAt, untilDate, payRatePerHour]
   );
 
   useEffect(() => {
@@ -100,7 +122,7 @@ export default function ClientPage() {
     e.preventDefault();
     setError('');
     setMessage('');
-    if (!schedule.scheduleStart || !schedule.scheduleEnd) {
+    if (user.role !== 'business' && (!schedule.scheduleStart || !schedule.scheduleEnd)) {
       setError('Choose a start and end date/time on the calendar');
       return;
     }
@@ -114,18 +136,14 @@ export default function ClientPage() {
         setError(`Hourly rate must be at least ${formatGbp(MINIMUM_WAGE_PER_HOUR)}`);
         return;
       }
-      if (payPreview.hours == null) {
-        setError(
-          'End time of day must be after start time of day so working hours × days can be calculated'
-        );
+      if (businessPreview.error) {
+        setError(businessPreview.error);
         return;
       }
     }
     try {
       const body = {
         serviceDetails,
-        scheduleStart: new Date(schedule.scheduleStart).toISOString(),
-        scheduleEnd: new Date(schedule.scheduleEnd).toISOString(),
         address: place.address.trim(),
         latitude: Number(place.latitude),
         longitude: Number(place.longitude),
@@ -137,6 +155,14 @@ export default function ClientPage() {
         }
         body.businessId = selectedBusinessId;
         body.payRatePerHour = Number(payRatePerHour);
+        body.jobType = jobType;
+        body.durationDays = Number(durationDays);
+        body.durationExtraHours = Number(durationExtraHours || 0);
+        body.scheduleStart = new Date(startsAt).toISOString();
+        if (jobType === 'recurring_until') body.recurrenceUntil = untilDate;
+      } else {
+        body.scheduleStart = new Date(schedule.scheduleStart).toISOString();
+        body.scheduleEnd = new Date(schedule.scheduleEnd).toISOString();
       }
       const created = await api('/api/requests', {
         method: 'POST',
@@ -280,12 +306,70 @@ export default function ClientPage() {
                 onChange={(e) => setServiceDetails(e.target.value)}
               />
             </label>
-            <label>
-              Preferred window
-              <DateTimeRangePicker value={schedule} onChange={setSchedule} />
-            </label>
             {user.role === 'business' ? (
               <>
+                <label>
+                  Job type
+                  <select value={jobType} onChange={(e) => setJobType(e.target.value)}>
+                    {JOB_TYPES.map(([value, label]) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="muted">
+                  {jobType === 'fixed'
+                    ? 'One job. Set how many days and extra hours it needs. 1 day is 8 hours.'
+                    : jobType === 'recurring_indefinite'
+                      ? 'The same days and hours repeat every week, with no end date.'
+                      : 'The same days and hours repeat every week until the date you choose.'}
+                </p>
+                <div className="row">
+                  <label>
+                    Days
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      required
+                      value={durationDays}
+                      onChange={(e) => setDurationDays(e.target.value)}
+                    />
+                  </label>
+                  <label>
+                    Extra hours
+                    <input
+                      type="number"
+                      min="0"
+                      max="7.99"
+                      step="0.5"
+                      required
+                      value={durationExtraHours}
+                      onChange={(e) => setDurationExtraHours(e.target.value)}
+                    />
+                  </label>
+                </div>
+                <label>
+                  First visit starts
+                  <input
+                    type="datetime-local"
+                    required
+                    value={startsAt}
+                    onChange={(e) => setStartsAt(e.target.value)}
+                  />
+                </label>
+                {jobType === 'recurring_until' ? (
+                  <label>
+                    Repeats until
+                    <input
+                      type="date"
+                      required
+                      value={untilDate}
+                      onChange={(e) => setUntilDate(e.target.value)}
+                    />
+                  </label>
+                ) : null}
                 <label>
                   Hourly pay rate (£)
                   <input
@@ -297,26 +381,38 @@ export default function ClientPage() {
                     onChange={(e) => setPayRatePerHour(e.target.value)}
                   />
                 </label>
-                <p className="muted">
-                  Minimum {formatGbp(MINIMUM_WAGE_PER_HOUR)} / hour
-                </p>
+                <p className="muted">Minimum {formatGbp(MINIMUM_WAGE_PER_HOUR)} / hour</p>
                 <div className="item">
-                  <div className="muted">
-                    {payPreview.hoursPerDay != null && payPreview.days != null
-                      ? `${payPreview.hoursPerDay}h/day × ${payPreview.days} day${
-                          payPreview.days === 1 ? '' : 's'
-                        } = ${payPreview.hours} hours`
-                      : 'Set start/end times with end later in the day than start'}
-                  </div>
-                  <div>
-                    <strong>Total: {formatGbp(payPreview.total)}</strong>
-                    {payPreview.belowMinimum ? (
-                      <span className="error"> (below minimum)</span>
-                    ) : null}
-                  </div>
+                  {businessPreview.error ? (
+                    <div className="muted">{businessPreview.error}</div>
+                  ) : (
+                    <>
+                      <div className="muted">
+                        {jobType === 'fixed'
+                          ? `${businessPreview.totalHours} hours in total.`
+                          : jobType === 'recurring_indefinite'
+                            ? `Each visit is ${businessPreview.visitHours} hours. It repeats every week with no end date.`
+                            : `Each visit is ${businessPreview.visitHours} hours. ${businessPreview.visitCount} weekly visits, ${businessPreview.totalHours} hours in total.`}
+                      </div>
+                      <div>
+                        <strong>
+                          {jobType === 'recurring_indefinite' ? 'Per visit: ' : 'Total: '}
+                          {formatGbp(businessPreview.total)}
+                        </strong>
+                        {businessPreview.belowMinimum ? (
+                          <span className="error"> (below minimum)</span>
+                        ) : null}
+                      </div>
+                    </>
+                  )}
                 </div>
               </>
-            ) : null}
+            ) : (
+              <label>
+                Preferred window
+                <DateTimeRangePicker value={schedule} onChange={setSchedule} />
+              </label>
+            )}
             <LocationPicker
               value={place}
               onChange={(next) => {
@@ -357,6 +453,7 @@ export default function ClientPage() {
                 </div>
                 <div>{r.serviceDetails}</div>
                 <div className="muted">{r.address}</div>
+                {describeJob(r) ? <div>{describeJob(r)}</div> : null}
                 {r.scheduleStart && r.scheduleEnd ? (
                   <div className="muted">
                     Window: {formatScheduleRange(r.scheduleStart, r.scheduleEnd)}
@@ -369,6 +466,7 @@ export default function ClientPage() {
                 {r.pay ? (
                   <div className="muted">
                     Pay: {formatPaySummary(r.pay)}
+                    {r.jobType === 'recurring_indefinite' ? ' per visit' : ''}
                     {isPaid ? ' · PAID' : ''}
                   </div>
                 ) : null}

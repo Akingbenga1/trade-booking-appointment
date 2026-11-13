@@ -6,12 +6,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { api } from '../../../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../../../components/ui';
 import { formatScheduleRange } from '../../../../../components/DateTimeRangePicker';
-import {
-  MINIMUM_WAGE_PER_HOUR,
-  computePayPreview,
-  durationHoursFromSchedule,
-  formatGbp,
-} from '../../../../../lib/jobPay';
+import { MINIMUM_WAGE_PER_HOUR, formatGbp } from '../../../../../lib/jobPay';
+import { allocatedHours, describeJob, HOURS_PER_DAY } from '../../../../../lib/jobHours';
 
 const OPEN_FOR_CREW = new Set(['assigned', 'en_route', 'on_site', 'in_progress']);
 
@@ -29,6 +25,7 @@ export default function AssignStaffPage() {
   const [staff, setStaff] = useState([]);
   const [picked, setPicked] = useState({});
   const [rates, setRates] = useState({});
+  const [timeChoices, setTimeChoices] = useState({});
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -53,7 +50,6 @@ export default function AssignStaffPage() {
     load().catch((err) => setError(err.message));
   }, [user, requestId, load]);
 
-  const hours = job ? durationHoursFromSchedule(job.scheduleStart, job.scheduleEnd) : null;
   const crew = job?.assignments || [];
   const onJob = useMemo(
     () => new Set(crew.map((row) => personId(row.staffUserId))),
@@ -69,6 +65,17 @@ export default function AssignStaffPage() {
     return rates[id] ?? String(MINIMUM_WAGE_PER_HOUR);
   }
 
+  function choiceFor(id) {
+    return timeChoices[id] || { unit: 'hours', amount: '' };
+  }
+
+  function setChoice(id, patch) {
+    setTimeChoices((current) => ({
+      ...current,
+      [id]: { unit: 'hours', amount: '', ...(current[id] || {}), ...patch },
+    }));
+  }
+
   function toggle(id) {
     setPicked((current) => ({ ...current, [id]: !current[id] }));
   }
@@ -82,10 +89,29 @@ export default function AssignStaffPage() {
       setError('Choose at least one staff member.');
       return;
     }
-    const staffBody = chosen.map((row) => {
+    const staffBody = [];
+    for (const row of chosen) {
       const id = personId(row.user);
-      return { staffUserId: id, payRatePerHour: Number(rateFor(id)) };
-    });
+      const choice = choiceFor(id);
+      const hours = allocatedHours(choice.unit, choice.amount);
+      if (hours == null) {
+        setError('Enter days or hours for every person you selected.');
+        return;
+      }
+      staffBody.push({
+        staffUserId: id,
+        payRatePerHour: Number(rateFor(id)),
+        allocatedHours: hours,
+      });
+    }
+    const asked = staffBody.reduce((sum, row) => sum + row.allocatedHours, 0);
+    if (job.hoursRemaining != null && asked - job.hoursRemaining > 0.0001) {
+      const left = Number(job.hoursRemaining);
+      const askedLabel = `${asked} hour${asked === 1 ? '' : 's'}`;
+      const leftLabel = `${left} hour${left === 1 ? '' : 's'}`;
+      setError(`Only ${leftLabel} are left. The people you picked add up to ${askedLabel}.`);
+      return;
+    }
     const tooLow = staffBody.find(
       (row) => !Number.isFinite(row.payRatePerHour) || row.payRatePerHour < MINIMUM_WAGE_PER_HOUR
     );
@@ -156,10 +182,18 @@ export default function AssignStaffPage() {
                 Window: {formatScheduleRange(job.scheduleStart, job.scheduleEnd)}
               </div>
             ) : null}
+            {describeJob(job) ? <div>{describeJob(job)}</div> : null}
             <div>
-              Job length: {hours == null ? 'not set' : `${hours} hours`}. Each person is paid their
-              own hourly rate times those hours if they carry out the job.
+              Hours on this job: {job.hourBudget ?? 'not set'}. Already given out:{' '}
+              {job.hoursAllocated ?? 0}. Still free: {job.hoursRemaining ?? '—'}. 1 day ={' '}
+              {HOURS_PER_DAY} hours.
             </div>
+            {job.jobType === 'recurring_indefinite' ? (
+              <div className="muted">
+                These hours are for one visit. The same split applies every week, and the job has no
+                end date.
+              </div>
+            ) : null}
           </div>
 
           <div className="card stack">
@@ -177,8 +211,8 @@ export default function AssignStaffPage() {
                     </div>
                     {pay ? (
                       <div>
-                        {formatGbp(pay.payRatePerHour)}/hr × {pay.durationHours}h ={' '}
-                        {formatGbp(pay.totalAmount)} if they carry out the job
+                        {pay.durationHours} hours · {formatGbp(pay.payRatePerHour)}/hr ={' '}
+                        {formatGbp(pay.totalAmount)} if they carry out their share
                       </div>
                     ) : (
                       <div className="muted">Pay is not set for this person.</div>
@@ -205,7 +239,10 @@ export default function AssignStaffPage() {
           {canEdit ? (
             <form className="card stack" onSubmit={assignSelected}>
               <h2>Add staff</h2>
-              <p className="muted">Choose one person or several. Set a rate for each.</p>
+              <p className="muted">
+                Choose one person or several. Give each a share of the hours, in hours or in days.
+                The shares cannot add up to more than the hours still free.
+              </p>
               {available.length === 0 ? (
                 <p className="muted">
                   No more staff to add.{' '}
@@ -215,7 +252,13 @@ export default function AssignStaffPage() {
               <div className="list">
                 {available.map((row) => {
                   const id = personId(row.user);
-                  const preview = computePayPreview(rateFor(id), job.scheduleStart, job.scheduleEnd);
+                  const choice = choiceFor(id);
+                  const share = picked[id] ? allocatedHours(choice.unit, choice.amount) : null;
+                  const rate = Number(rateFor(id));
+                  const pay =
+                    share != null && Number.isFinite(rate)
+                      ? Math.round(rate * share * 100) / 100
+                      : null;
                   return (
                     <div className="item stack" key={id}>
                       <label className="row" style={{ color: 'inherit' }}>
@@ -230,6 +273,28 @@ export default function AssignStaffPage() {
                           {row.user?.email ? ` · ${row.user.email}` : ''}
                         </span>
                       </label>
+                      <div className="row">
+                        <label>
+                          Time unit
+                          <select
+                            value={choice.unit}
+                            onChange={(e) => setChoice(id, { unit: e.target.value })}
+                          >
+                            <option value="hours">Hours</option>
+                            <option value="days">Days (8 hours)</option>
+                          </select>
+                        </label>
+                        <label>
+                          {choice.unit === 'days' ? 'Days' : 'Hours'}
+                          <input
+                            type="number"
+                            min="0.25"
+                            step="0.25"
+                            value={choice.amount}
+                            onChange={(e) => setChoice(id, { amount: e.target.value })}
+                          />
+                        </label>
+                      </div>
                       <label>
                         Pay £/hr
                         <input
@@ -243,10 +308,10 @@ export default function AssignStaffPage() {
                         />
                       </label>
                       <div className="muted">
-                        {preview.total == null
-                          ? 'Enter a rate to see their pay.'
-                          : `Will be paid ${formatGbp(preview.total)} if they carry out the job.`}
-                        {preview.belowMinimum
+                        {share == null
+                          ? 'Enter time to see their pay.'
+                          : `${share} hours. Will be paid ${formatGbp(pay)} if they carry out that share.`}
+                        {Number.isFinite(rate) && rate < MINIMUM_WAGE_PER_HOUR
                           ? ` Rate must be at least £${MINIMUM_WAGE_PER_HOUR} per hour.`
                           : ''}
                       </div>

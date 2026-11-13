@@ -8,6 +8,7 @@ import { User } from '../src/models/User.js';
 import { CleaningRequest } from '../src/models/CleaningRequest.js';
 import { Notification } from '../src/models/Notification.js';
 import { CleaningAgency } from '../src/models/CleaningAgency.js';
+import { Business } from '../src/models/Business.js';
 import { AgencyMembership } from '../src/models/AgencyMembership.js';
 import { RequestOffer } from '../src/models/RequestOffer.js';
 import { RequestEvent } from '../src/models/RequestEvent.js';
@@ -141,6 +142,7 @@ describe('cleaning agency booking', () => {
     await assignAgencyStaff(req._id, agency._id, owner._id, {
       staffUserId: staff._id,
       payRatePerHour: 14,
+      allocatedHours: 16,
     });
     const pay = await StaffJobPay.findOne({ requestId: req._id, staffUserId: staff._id });
     assert.ok(pay);
@@ -201,26 +203,97 @@ describe('cleaning agency booking', () => {
     });
     await agencyAcceptRequest(req._id, agency._id, owner._id);
 
+    await assert.rejects(
+      () =>
+        assignAgencyStaff(req._id, agency._id, owner._id, {
+          staffUserId: staff._id,
+          payRatePerHour: 13,
+          allocatedHours: 5,
+        }),
+      /Only 4 hours are left/
+    );
+
     const assigned = await assignAgencyStaffMany(req._id, agency._id, owner._id, [
-      { staffUserId: staff._id, payRatePerHour: 13 },
-      { staffUserId: staffB._id, payRatePerHour: 15 },
+      { staffUserId: staff._id, payRatePerHour: 13, allocatedHours: 3 },
+      { staffUserId: staffB._id, payRatePerHour: 15, allocatedDays: 0.125 },
     ]);
     assert.equal(assigned.assignments.length, 2);
     const byName = Object.fromEntries(
       assigned.assignments.map((row) => [row.staffUserId.name, row.pay.totalAmount])
     );
-    assert.equal(byName.Staff, 52);
-    assert.equal(byName['Staff B'], 60);
-    assert.equal(assigned.crewPayTotal, 112);
+    assert.equal(byName.Staff, 39);
+    assert.equal(byName['Staff B'], 15);
+    assert.equal(assigned.crewPayTotal, 54);
+    assert.equal(assigned.hoursRemaining, 0);
 
     const left = await removeAgencyStaff(req._id, agency._id, owner._id, staff._id);
     assert.equal(left.assignments.length, 1);
-    assert.equal(left.assignments[0].pay.totalAmount, 60);
-    assert.equal(left.crewPayTotal, 60);
+    assert.equal(left.assignments[0].pay.totalAmount, 15);
+    assert.equal(left.crewPayTotal, 15);
+    assert.equal(left.hoursRemaining, 3);
     const removedPay = await StaffJobPay.findOne({
       requestId: req._id,
       staffUserId: staff._id,
     });
     assert.equal(removedPay, null);
+  });
+
+  it('creates business jobs as a fixed hour total, an open-ended repeat, or a repeat until a date', async () => {
+    const business = await Business.create({
+      name: 'Hours Co',
+      phone: '07000000002',
+      address: '1 Hour St',
+      latitude: hub.lat,
+      longitude: hub.lng,
+      createdBy: owner._id,
+    });
+    const start = new Date(Date.now() + 3 * 86400000);
+    start.setHours(9, 0, 0, 0);
+    const until = new Date(start);
+    until.setDate(until.getDate() + 14);
+    const common = {
+      clientId: owner._id,
+      businessId: business._id,
+      scheduleStart: start,
+      address: '1 Hour St',
+      latitude: hub.lat,
+      longitude: hub.lng,
+      payRatePerHour: 13,
+    };
+
+    const fixed = await createCleaningRequest({
+      ...common,
+      serviceDetails: 'Fixed days',
+      jobType: 'fixed',
+      durationDays: 1,
+      durationExtraHours: 2,
+    });
+    assert.equal(fixed.totalHours, 10);
+    assert.equal(fixed.pay.durationHours, 10);
+    assert.equal(fixed.pay.totalAmount, 130);
+
+    const forever = await createCleaningRequest({
+      ...common,
+      serviceDetails: 'Forever clean',
+      jobType: 'recurring_indefinite',
+      durationDays: 1,
+      durationExtraHours: 0,
+    });
+    assert.equal(forever.visitHours, 8);
+    assert.equal(forever.visitCount, null);
+    assert.equal(forever.totalHours, 8);
+    assert.equal(forever.pay.totalAmount, 104);
+
+    const untilJob = await createCleaningRequest({
+      ...common,
+      serviceDetails: 'Until clean',
+      jobType: 'recurring_until',
+      durationDays: 1,
+      durationExtraHours: 0,
+      recurrenceUntil: until,
+    });
+    assert.equal(untilJob.visitCount, 3);
+    assert.equal(untilJob.totalHours, 24);
+    assert.equal(untilJob.pay.totalAmount, 312);
   });
 });

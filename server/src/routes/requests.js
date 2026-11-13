@@ -51,6 +51,10 @@ router.post('/', requireAuth, requireRole('client', 'business'), async (req, res
       longitude,
       businessId,
       payRatePerHour,
+      jobType,
+      durationDays,
+      durationExtraHours,
+      recurrenceUntil,
     } = req.body;
     if (!serviceDetails) {
       return res.status(400).json({ error: 'serviceDetails required' });
@@ -81,6 +85,10 @@ router.post('/', requireAuth, requireRole('client', 'business'), async (req, res
       scheduleEnd,
       ...place,
       payRatePerHour: ownerBusinessId ? payRatePerHour : undefined,
+      jobType: ownerBusinessId ? jobType : undefined,
+      durationDays: ownerBusinessId ? durationDays : undefined,
+      durationExtraHours: ownerBusinessId ? durationExtraHours : undefined,
+      recurrenceUntil: ownerBusinessId ? recurrenceUntil : undefined,
     });
     res.status(201).json(request);
   } catch (err) {
@@ -362,7 +370,7 @@ router.post(
   requireRole('cleaning_agency'),
   async (req, res) => {
     try {
-      const { agencyId, staffUserId, payRatePerHour } = req.body;
+      const { agencyId, staffUserId, payRatePerHour, allocatedHours, allocatedDays } = req.body;
       const many = Array.isArray(req.body.staff);
       if (!agencyId || (!many && (!staffUserId || payRatePerHour == null))) {
         return res
@@ -374,6 +382,8 @@ router.post(
         : await assignAgencyStaff(req.params.id, agencyId, req.user.id, {
             staffUserId,
             payRatePerHour,
+            allocatedHours,
+            allocatedDays,
           });
       res.json(request);
     } catch (err) {
@@ -411,7 +421,8 @@ router.post(
   requireRole('cleaning_agency'),
   async (req, res) => {
     try {
-      const { agencyId, fromStaffUserId, toStaffUserId, payRatePerHour } = req.body;
+      const { agencyId, fromStaffUserId, toStaffUserId, payRatePerHour, allocatedHours, allocatedDays } =
+        req.body;
       if (!agencyId || !fromStaffUserId || !toStaffUserId || payRatePerHour == null) {
         return res.status(400).json({
           error: 'agencyId, fromStaffUserId, toStaffUserId, and payRatePerHour required',
@@ -421,6 +432,8 @@ router.post(
         fromStaffUserId,
         toStaffUserId,
         payRatePerHour,
+        allocatedHours,
+        allocatedDays,
       });
       res.json(request);
     } catch (err) {

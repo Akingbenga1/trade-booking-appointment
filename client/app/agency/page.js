@@ -35,6 +35,7 @@ export default function AgencyPage() {
     requestId: '',
     staffUserId: '',
     payRatePerHour: String(MINIMUM_WAGE_PER_HOUR),
+    allocatedHours: '1',
   });
 
   useEffect(() => {
@@ -122,6 +123,7 @@ export default function AgencyPage() {
           agencyId,
           staffUserId: assignForm.staffUserId,
           payRatePerHour: Number(assignForm.payRatePerHour),
+          allocatedHours: Number(assignForm.allocatedHours),
         },
       });
       setMessage('Staff assigned (awaiting their confirm).');
@@ -291,6 +293,20 @@ export default function AgencyPage() {
               ))}
             </select>
           </label>
+          <label>
+            Hours for this person
+            <input
+              required
+              type="number"
+              step="0.25"
+              min="0.25"
+              value={assignForm.allocatedHours}
+              onChange={(e) =>
+                setAssignForm({ ...assignForm, allocatedHours: e.target.value })
+              }
+            />
+          </label>
+          <p className="muted">1 day is 8 hours. This cannot be more than the hours still free on the job.</p>
           <label>
             Staff pay £/hr
             <input

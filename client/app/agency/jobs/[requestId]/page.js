@@ -25,6 +25,7 @@ export default function SwapStaffPage() {
   const [staffA, setStaffA] = useState('');
   const [staffB, setStaffB] = useState('');
   const [payRatePerHour, setPayRatePerHour] = useState(String(MINIMUM_WAGE_PER_HOUR));
+  const [allocatedHours, setAllocatedHours] = useState('1');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -67,6 +68,11 @@ export default function SwapStaffPage() {
     if (!staffA && crew[0]) setStaffA(personId(crew[0].staffUserId));
   }, [crew, staffA]);
 
+  useEffect(() => {
+    const current = crew.find((row) => personId(row.staffUserId) === staffA);
+    if (current?.pay?.durationHours) setAllocatedHours(String(current.pay.durationHours));
+  }, [crew, staffA]);
+
   const canSwap = Boolean(job && SWAPPABLE.has(job.status) && job.assignedAgencyId);
 
   async function onSubmit(e) {
@@ -86,6 +92,7 @@ export default function SwapStaffPage() {
           fromStaffUserId: staffA,
           toStaffUserId: staffB,
           payRatePerHour: Number(payRatePerHour),
+          allocatedHours: Number(allocatedHours),
         },
       });
       setJob(updated);
@@ -179,6 +186,18 @@ export default function SwapStaffPage() {
                   Add another staff account on the agency home before swapping.
                 </p>
               ) : null}
+              <label>
+                Hours staff B will work
+                <input
+                  required
+                  type="number"
+                  step="0.25"
+                  min="0.25"
+                  value={allocatedHours}
+                  onChange={(e) => setAllocatedHours(e.target.value)}
+                />
+              </label>
+              <p className="muted">1 day is 8 hours. Staff B takes this share of the job.</p>
               <label>
                 Staff B pay £/hr
                 <input
