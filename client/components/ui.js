@@ -28,7 +28,7 @@ export function useRequireRole(role) {
   return user;
 }
 
-const NOTIFY_ROLES = new Set(['client', 'business', 'cleaner']);
+const NOTIFY_ROLES = new Set(['client', 'business', 'cleaner', 'agency_staff']);
 /** Polling is a safety net; live alerts arrive over WebSocket. */
 const POLL_MS_CONNECTED = 60_000;
 const POLL_MS_DISCONNECTED = 15_000;

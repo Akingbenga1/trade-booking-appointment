@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../components/ui';
@@ -34,6 +35,7 @@ export default function AgencyPage() {
     requestId: '',
     staffUserId: '',
     payRatePerHour: String(MINIMUM_WAGE_PER_HOUR),
+    allocatedHours: '1',
   });
 
   useEffect(() => {
@@ -121,6 +123,7 @@ export default function AgencyPage() {
           agencyId,
           staffUserId: assignForm.staffUserId,
           payRatePerHour: Number(assignForm.payRatePerHour),
+          allocatedHours: Number(assignForm.allocatedHours),
         },
       });
       setMessage('Staff assigned (awaiting their confirm).');
@@ -170,7 +173,10 @@ export default function AgencyPage() {
 
       <div className="grid grid-2">
         <div className="card stack">
-          <h2>Nearby offers</h2>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Nearby offers</h2>
+            <Link href="/agency/offers">all offers</Link>
+          </div>
           <div className="list">
             {pendingOffers.length === 0 ? (
               <p className="muted">No pending agency offers.</p>
@@ -288,6 +294,20 @@ export default function AgencyPage() {
             </select>
           </label>
           <label>
+            Hours for this person
+            <input
+              required
+              type="number"
+              step="0.25"
+              min="0.25"
+              value={assignForm.allocatedHours}
+              onChange={(e) =>
+                setAssignForm({ ...assignForm, allocatedHours: e.target.value })
+              }
+            />
+          </label>
+          <p className="muted">1 day is 8 hours. This cannot be more than the hours still free on the job.</p>
+          <label>
             Staff pay £/hr
             <input
               required
@@ -320,11 +340,15 @@ export default function AgencyPage() {
               ) : (
                 <div className="muted">No staff assigned yet</div>
               )}
-              {NEXT_STEP[r.status] ? (
-                <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>
-                  Mark {NEXT_STEP[r.status].replaceAll('_', ' ')}
-                </button>
-              ) : null}
+              <div className="row">
+                <Link href={`/agency/jobs/${r._id}/assign`}>Assign staff</Link>
+                <Link href={`/agency/jobs/${r._id}`}>Swap staff</Link>
+                {NEXT_STEP[r.status] ? (
+                  <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>
+                    Mark {NEXT_STEP[r.status].replaceAll('_', ' ')}
+                  </button>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>

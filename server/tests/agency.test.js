@@ -8,6 +8,7 @@ import { User } from '../src/models/User.js';
 import { CleaningRequest } from '../src/models/CleaningRequest.js';
 import { Notification } from '../src/models/Notification.js';
 import { CleaningAgency } from '../src/models/CleaningAgency.js';
+import { Business } from '../src/models/Business.js';
 import { AgencyMembership } from '../src/models/AgencyMembership.js';
 import { RequestOffer } from '../src/models/RequestOffer.js';
 import { RequestEvent } from '../src/models/RequestEvent.js';
@@ -20,6 +21,8 @@ import {
   pickAgencyForRequest,
   agencyAcceptRequest,
   assignAgencyStaff,
+  assignAgencyStaffMany,
+  removeAgencyStaff,
   staffRespondToAssignment,
   advanceBooking,
 } from '../src/services/requestService.js';
@@ -139,10 +142,13 @@ describe('cleaning agency booking', () => {
     await assignAgencyStaff(req._id, agency._id, owner._id, {
       staffUserId: staff._id,
       payRatePerHour: 14,
+      allocatedHours: 16,
     });
     const pay = await StaffJobPay.findOne({ requestId: req._id, staffUserId: staff._id });
     assert.ok(pay);
     assert.equal(pay.payRatePerHour, 14);
+    assert.equal(pay.durationHours, 16);
+    assert.equal(pay.totalAmount, 224);
 
     await staffRespondToAssignment(req._id, staff._id, 'confirm');
     const assignment = await JobAssignment.findOne({
@@ -163,5 +169,131 @@ describe('cleaning agency booking', () => {
         advanceBooking(req._id, { id: staff._id.toString(), role: 'agency_staff' }, 'on_site'),
       /Only the assigned agency/i
     );
+  });
+
+  it('assigns several staff, pays each for the job hours, and recalculates when one is removed', async () => {
+    const staffB = await makeUser({
+      name: 'Staff B',
+      email: 'ag-staff-b@test.com',
+      role: 'agency_staff',
+    });
+    await AgencyMembership.create({
+      agencyId: agency._id,
+      userId: staffB._id,
+      memberRole: 'staff',
+    });
+
+    const scheduleStart = new Date(Date.now() + 2 * 86400000);
+    scheduleStart.setHours(9, 0, 0, 0);
+    const scheduleEnd = new Date(scheduleStart);
+    scheduleEnd.setHours(13, 0, 0, 0);
+    const req = await createCleaningRequest({
+      clientId: client._id,
+      serviceDetails: 'Crew job',
+      scheduleStart,
+      scheduleEnd,
+      address: '2 Job St',
+      latitude: hub.lat,
+      longitude: hub.lng,
+    });
+    await expressAgencyInterest(req._id, agency._id, owner._id);
+    await pickAgencyForRequest(req._id, agency._id, {
+      id: client._id.toString(),
+      role: 'client',
+    });
+    await agencyAcceptRequest(req._id, agency._id, owner._id);
+
+    await assert.rejects(
+      () =>
+        assignAgencyStaff(req._id, agency._id, owner._id, {
+          staffUserId: staff._id,
+          payRatePerHour: 13,
+          allocatedHours: 5,
+        }),
+      /Only 4 hours are left/
+    );
+
+    const assigned = await assignAgencyStaffMany(req._id, agency._id, owner._id, [
+      { staffUserId: staff._id, payRatePerHour: 13, allocatedHours: 3 },
+      { staffUserId: staffB._id, payRatePerHour: 15, allocatedDays: 0.125 },
+    ]);
+    assert.equal(assigned.assignments.length, 2);
+    const byName = Object.fromEntries(
+      assigned.assignments.map((row) => [row.staffUserId.name, row.pay.totalAmount])
+    );
+    assert.equal(byName.Staff, 39);
+    assert.equal(byName['Staff B'], 15);
+    assert.equal(assigned.crewPayTotal, 54);
+    assert.equal(assigned.hoursRemaining, 0);
+
+    const left = await removeAgencyStaff(req._id, agency._id, owner._id, staff._id);
+    assert.equal(left.assignments.length, 1);
+    assert.equal(left.assignments[0].pay.totalAmount, 15);
+    assert.equal(left.crewPayTotal, 15);
+    assert.equal(left.hoursRemaining, 3);
+    const removedPay = await StaffJobPay.findOne({
+      requestId: req._id,
+      staffUserId: staff._id,
+    });
+    assert.equal(removedPay, null);
+  });
+
+  it('creates business jobs as a fixed hour total, an open-ended repeat, or a repeat until a date', async () => {
+    const business = await Business.create({
+      name: 'Hours Co',
+      phone: '07000000002',
+      address: '1 Hour St',
+      latitude: hub.lat,
+      longitude: hub.lng,
+      createdBy: owner._id,
+    });
+    const start = new Date(Date.now() + 3 * 86400000);
+    start.setHours(9, 0, 0, 0);
+    const until = new Date(start);
+    until.setDate(until.getDate() + 14);
+    const common = {
+      clientId: owner._id,
+      businessId: business._id,
+      scheduleStart: start,
+      address: '1 Hour St',
+      latitude: hub.lat,
+      longitude: hub.lng,
+      payRatePerHour: 13,
+    };
+
+    const fixed = await createCleaningRequest({
+      ...common,
+      serviceDetails: 'Fixed days',
+      jobType: 'fixed',
+      durationDays: 1,
+      durationExtraHours: 2,
+    });
+    assert.equal(fixed.totalHours, 10);
+    assert.equal(fixed.pay.durationHours, 10);
+    assert.equal(fixed.pay.totalAmount, 130);
+
+    const forever = await createCleaningRequest({
+      ...common,
+      serviceDetails: 'Forever clean',
+      jobType: 'recurring_indefinite',
+      durationDays: 1,
+      durationExtraHours: 0,
+    });
+    assert.equal(forever.visitHours, 8);
+    assert.equal(forever.visitCount, null);
+    assert.equal(forever.totalHours, 8);
+    assert.equal(forever.pay.totalAmount, 104);
+
+    const untilJob = await createCleaningRequest({
+      ...common,
+      serviceDetails: 'Until clean',
+      jobType: 'recurring_until',
+      durationDays: 1,
+      durationExtraHours: 0,
+      recurrenceUntil: until,
+    });
+    assert.equal(untilJob.visitCount, 3);
+    assert.equal(untilJob.totalHours, 24);
+    assert.equal(untilJob.pay.totalAmount, 312);
   });
 });

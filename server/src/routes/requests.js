@@ -18,6 +18,8 @@ import {
   pickAgencyForRequest,
   agencyAcceptRequest,
   assignAgencyStaff,
+  assignAgencyStaffMany,
+  removeAgencyStaff,
   reassignAgencyStaff,
   staffRespondToAssignment,
   listInterestsForRequest,
@@ -49,6 +51,10 @@ router.post('/', requireAuth, requireRole('client', 'business'), async (req, res
       longitude,
       businessId,
       payRatePerHour,
+      jobType,
+      durationDays,
+      durationExtraHours,
+      recurrenceUntil,
     } = req.body;
     if (!serviceDetails) {
       return res.status(400).json({ error: 'serviceDetails required' });
@@ -79,6 +85,10 @@ router.post('/', requireAuth, requireRole('client', 'business'), async (req, res
       scheduleEnd,
       ...place,
       payRatePerHour: ownerBusinessId ? payRatePerHour : undefined,
+      jobType: ownerBusinessId ? jobType : undefined,
+      durationDays: ownerBusinessId ? durationDays : undefined,
+      durationExtraHours: ownerBusinessId ? durationExtraHours : undefined,
+      recurrenceUntil: ownerBusinessId ? recurrenceUntil : undefined,
     });
     res.status(201).json(request);
   } catch (err) {
@@ -360,16 +370,44 @@ router.post(
   requireRole('cleaning_agency'),
   async (req, res) => {
     try {
-      const { agencyId, staffUserId, payRatePerHour } = req.body;
-      if (!agencyId || !staffUserId || payRatePerHour == null) {
+      const { agencyId, staffUserId, payRatePerHour, allocatedHours, allocatedDays } = req.body;
+      const many = Array.isArray(req.body.staff);
+      if (!agencyId || (!many && (!staffUserId || payRatePerHour == null))) {
         return res
           .status(400)
           .json({ error: 'agencyId, staffUserId, and payRatePerHour required' });
       }
-      const request = await assignAgencyStaff(req.params.id, agencyId, req.user.id, {
-        staffUserId,
-        payRatePerHour,
-      });
+      const request = Array.isArray(req.body.staff)
+        ? await assignAgencyStaffMany(req.params.id, agencyId, req.user.id, req.body.staff)
+        : await assignAgencyStaff(req.params.id, agencyId, req.user.id, {
+            staffUserId,
+            payRatePerHour,
+            allocatedHours,
+            allocatedDays,
+          });
+      res.json(request);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
+  '/:id/remove-staff',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const { agencyId, staffUserId } = req.body;
+      if (!agencyId || !staffUserId) {
+        return res.status(400).json({ error: 'agencyId and staffUserId required' });
+      }
+      const request = await removeAgencyStaff(
+        req.params.id,
+        agencyId,
+        req.user.id,
+        staffUserId
+      );
       res.json(request);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
@@ -383,7 +421,8 @@ router.post(
   requireRole('cleaning_agency'),
   async (req, res) => {
     try {
-      const { agencyId, fromStaffUserId, toStaffUserId, payRatePerHour } = req.body;
+      const { agencyId, fromStaffUserId, toStaffUserId, payRatePerHour, allocatedHours, allocatedDays } =
+        req.body;
       if (!agencyId || !fromStaffUserId || !toStaffUserId || payRatePerHour == null) {
         return res.status(400).json({
           error: 'agencyId, fromStaffUserId, toStaffUserId, and payRatePerHour required',
@@ -393,6 +432,8 @@ router.post(
         fromStaffUserId,
         toStaffUserId,
         payRatePerHour,
+        allocatedHours,
+        allocatedDays,
       });
       res.json(request);
     } catch (err) {

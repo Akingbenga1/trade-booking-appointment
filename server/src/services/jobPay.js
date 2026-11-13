@@ -76,7 +76,7 @@ export function durationHoursFromSchedule(scheduleStart, scheduleEnd) {
  * Validate hourly rate and compute pay fields for a schedule window.
  * @returns {{ payRatePerHour: number, currency: string, minimumWagePerHour: number, durationHours: number, totalAmount: number }}
  */
-export function parseJobPay(payRatePerHour, scheduleStart, scheduleEnd) {
+export function parseJobPay(payRatePerHour, scheduleStart, scheduleEnd, options = {}) {
   if (payRatePerHour == null || payRatePerHour === '') {
     const err = new Error('payRatePerHour is required for business posts');
     err.status = 400;
@@ -96,7 +96,15 @@ export function parseJobPay(payRatePerHour, scheduleStart, scheduleEnd) {
     throw err;
   }
 
-  const durationHours = durationHoursFromSchedule(scheduleStart, scheduleEnd);
+  const durationHours =
+    options.durationHours != null
+      ? roundHours(options.durationHours)
+      : durationHoursFromSchedule(scheduleStart, scheduleEnd);
+  if (!(durationHours > 0)) {
+    const err = new Error('Job hours must be more than 0');
+    err.status = 400;
+    throw err;
+  }
   const totalAmount = roundMoney(rate * durationHours);
 
   return {
@@ -133,6 +141,11 @@ export function payToPublic(businessPayment, transaction) {
   };
 }
 
+/** Staff or visit pay from an hourly rate and an hour count. */
+export function quoteHourlyPay(payRatePerHour, durationHours) {
+  return parseJobPay(payRatePerHour, null, null, { durationHours });
+}
+
 /**
  * Create unpaid transaction + business ownership for a new business request.
  * @returns {{ businessPayment: object, transaction: object }}
@@ -143,8 +156,9 @@ export async function createJobPayForRequest({
   payRatePerHour,
   scheduleStart,
   scheduleEnd,
+  durationHours,
 }) {
-  const fields = parseJobPay(payRatePerHour, scheduleStart, scheduleEnd);
+  const fields = parseJobPay(payRatePerHour, scheduleStart, scheduleEnd, { durationHours });
   const transaction = await Transaction.create({
     requestId,
     amount: fields.totalAmount,
@@ -182,7 +196,9 @@ export async function syncJobPayForRequest(request, { payRatePerHour } = {}) {
     throw err;
   }
 
-  const fields = parseJobPay(rate, request.scheduleStart, request.scheduleEnd);
+  const fields = parseJobPay(rate, request.scheduleStart, request.scheduleEnd, {
+    durationHours: request.totalHours > 0 ? request.totalHours : undefined,
+  });
 
   if (existing) {
     existing.payRatePerHour = fields.payRatePerHour;
