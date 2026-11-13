@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../components/ui';
@@ -320,11 +321,14 @@ export default function AgencyPage() {
               ) : (
                 <div className="muted">No staff assigned yet</div>
               )}
-              {NEXT_STEP[r.status] ? (
-                <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>
-                  Mark {NEXT_STEP[r.status].replaceAll('_', ' ')}
-                </button>
-              ) : null}
+              <div className="row">
+                <Link href={`/agency/jobs/${r._id}`}>Swap staff</Link>
+                {NEXT_STEP[r.status] ? (
+                  <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>
+                    Mark {NEXT_STEP[r.status].replaceAll('_', ' ')}
+                  </button>
+                ) : null}
+              </div>
             </div>
           ))}
         </div>
