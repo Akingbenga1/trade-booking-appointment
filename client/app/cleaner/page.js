@@ -227,6 +227,8 @@ export default function CleanerPage() {
                   <div className="muted">Pay: {formatPaySummary(r.pay)}</div>
                 ) : null}
                 {isStaff && r.myAssignment?.confirmStatus === 'pending' ? (
+                  <>
+                  <div>Your agency assigned you this job. Confirm or decline.</div>
                   <div className="row">
                     <button type="button" onClick={() => staffRespond(r._id, 'confirm')}>
                       Confirm assignment
@@ -239,6 +241,7 @@ export default function CleanerPage() {
                       Decline
                     </button>
                   </div>
+                  </>
                 ) : null}
                 {!isStaff && NEXT_STEP[r.status] ? (
                   <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>
