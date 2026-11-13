@@ -65,13 +65,17 @@ router.get('/:agencyId/offers', requireAuth, requireRole('cleaning_agency'), asy
     const requests = await CleaningRequest.find({
       _id: { $in: requestIds },
       ...notDeletedFilter,
-    });
+    })
+      .populate('clientId', 'name email role')
+      .populate('businessId', 'name');
     const byId = new Map(requests.map((r) => [String(r._id), r]));
     const shaped = [];
     for (const offer of offers) {
       const doc = byId.get(String(offer.requestId));
       if (!doc) continue;
       const plain = await hydrateRequest(doc);
+      const client = plain.clientId && plain.clientId.name ? plain.clientId : null;
+      const business = plain.businessId && plain.businessId.name ? plain.businessId : null;
       shaped.push({
         request: plain,
         offer: {
@@ -81,6 +85,11 @@ router.get('/:agencyId/offers', requireAuth, requireRole('cleaning_agency'), asy
           expiresAt: offer.expiresAt,
           notifiedAt: offer.notifiedAt,
         },
+        jobType: business ? 'Business' : 'Personal client',
+        owner: client
+          ? { name: client.name, email: client.email, role: client.role }
+          : null,
+        businessName: business ? business.name : null,
       });
     }
     res.json(shaped);

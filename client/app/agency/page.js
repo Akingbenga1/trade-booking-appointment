@@ -171,7 +171,10 @@ export default function AgencyPage() {
 
       <div className="grid grid-2">
         <div className="card stack">
-          <h2>Nearby offers</h2>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Nearby offers</h2>
+            <Link href="/agency/offers">all offers</Link>
+          </div>
           <div className="list">
             {pendingOffers.length === 0 ? (
               <p className="muted">No pending agency offers.</p>
