@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { RequestOffer } from '../models/RequestOffer.js';
 import { CleaningRequest } from '../models/CleaningRequest.js';
+import { AgencyJobInterest } from '../models/AgencyJobInterest.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
   createAgencyStaff,
@@ -69,6 +70,13 @@ router.get('/:agencyId/offers', requireAuth, requireRole('cleaning_agency'), asy
       .populate('clientId', 'name email role')
       .populate('businessId', 'name');
     const byId = new Map(requests.map((r) => [String(r._id), r]));
+    const interests = await AgencyJobInterest.find({
+      agencyId: req.params.agencyId,
+      requestId: { $in: requestIds },
+    });
+    const interestByRequest = new Map(
+      interests.map((row) => [String(row.requestId), row.status])
+    );
     const shaped = [];
     for (const offer of offers) {
       const doc = byId.get(String(offer.requestId));
@@ -76,6 +84,7 @@ router.get('/:agencyId/offers', requireAuth, requireRole('cleaning_agency'), asy
       const plain = await hydrateRequest(doc);
       const client = plain.clientId && plain.clientId.name ? plain.clientId : null;
       const business = plain.businessId && plain.businessId.name ? plain.businessId : null;
+      const selectedId = plain.selectedAgencyId?._id || plain.selectedAgencyId;
       shaped.push({
         request: plain,
         offer: {
@@ -90,6 +99,9 @@ router.get('/:agencyId/offers', requireAuth, requireRole('cleaning_agency'), asy
           ? { name: client.name, email: client.email, role: client.role }
           : null,
         businessName: business ? business.name : null,
+        interestStatus: interestByRequest.get(String(plain._id)) || null,
+        canLock:
+          plain.status === 'open' && String(selectedId || '') === String(req.params.agencyId),
       });
     }
     res.json(shaped);
