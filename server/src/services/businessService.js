@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { Business } from '../models/Business.js';
+import { BusinessMembership } from '../models/BusinessMembership.js';
 import { User } from '../models/User.js';
 import { config } from '../config.js';
 import { parsePlaceFields } from './place.js';
@@ -32,23 +33,38 @@ export function publicUser(user) {
 
 export async function isBusinessMember(userId, businessId) {
   if (!businessId) return false;
-  const biz = await Business.findOne({ _id: businessId, memberIds: userId }).select('_id');
-  return Boolean(biz);
+  const row = await BusinessMembership.findOne({
+    businessId,
+    userId,
+  }).select('_id');
+  return Boolean(row);
 }
 
 export async function listBusinessesForUser(userId) {
-  return Business.find({ memberIds: userId }).sort({ createdAt: 1 });
+  const memberships = await BusinessMembership.find({ userId }).select('businessId');
+  const ids = memberships.map((m) => m.businessId);
+  if (!ids.length) return [];
+  return Business.find({ _id: { $in: ids } }).sort({ createdAt: 1 });
+}
+
+async function addBusinessMembership(businessId, userId, memberRole = 'owner') {
+  await BusinessMembership.findOneAndUpdate(
+    { businessId, userId },
+    { businessId, userId, memberRole },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 }
 
 export async function createBusinessForUser(user, { name, phone, address, latitude, longitude }) {
   const place = parsePlaceFields({ address, latitude, longitude });
-  return Business.create({
+  const business = await Business.create({
     name: String(name).trim(),
     phone: String(phone).trim(),
     ...place,
-    memberIds: [user._id],
     createdBy: user._id,
   });
+  await addBusinessMembership(business._id, user._id, 'owner');
+  return business;
 }
 
 export async function registerBusinessRepresentative({
@@ -109,13 +125,12 @@ export async function registerBusinessRepresentative({
     name: String(businessName).trim(),
     phone: String(phone).trim(),
     ...place,
-    memberIds: [user._id],
     createdBy: user._id,
   });
+  await addBusinessMembership(business._id, user._id, 'owner');
   console.log(`[signup] business created id=${business._id} name="${business.name}"`);
 
   const link = `${config.clientOrigin}/auth/magic?token=${magic.token}`;
-  // Always log for local tracing (Mailtrap inbox may lag; grep [signup] magicLink=)
   console.log(
     `[signup] magicLink user=${user.email} expiresAt=${magic.expiresAt.toISOString()} url=${link}`
   );

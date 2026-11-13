@@ -1,6 +1,6 @@
 import { api, getStoredUser } from './api';
 
-const PUSH_ROLES = new Set(['cleaner', 'business']);
+const PUSH_ROLES = new Set(['cleaner', 'business', 'cleaning_agency', 'agency_staff']);
 
 function firebaseWebConfig() {
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;

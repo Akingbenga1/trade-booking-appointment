@@ -13,21 +13,26 @@ export default function AdminPage() {
   const [stats, setStats] = useState({});
   const [selected, setSelected] = useState(null);
   const [cleanerId, setCleanerId] = useState('');
+  const [agencyId, setAgencyId] = useState('');
+  const [agencies, setAgencies] = useState([]);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
   const load = useCallback(async () => {
-    const [reqs, us, st] = await Promise.all([
+    const [reqs, us, st, agencies] = await Promise.all([
       api('/api/admin/requests'),
       api('/api/admin/users'),
       api('/api/admin/stats'),
+      api('/api/admin/agencies'),
     ]);
     setRequests(reqs);
     setUsers(us);
     setStats(st);
+    setAgencies(agencies);
     const cleaners = us.filter((u) => u.role === 'cleaner' && !u.isDisabled);
     if (!cleanerId && cleaners[0]) setCleanerId(cleaners[0]._id);
-  }, [cleanerId]);
+    if (!agencyId && agencies[0]) setAgencyId(agencies[0]._id);
+  }, [cleanerId, agencyId]);
 
   useEffect(() => {
     if (!user) return;
@@ -55,7 +60,24 @@ export default function AdminPage() {
         method: 'POST',
         body: { cleanerId },
       });
-      setMessage('Force-assigned.');
+      setMessage('Force-assigned cleaner.');
+      await load();
+      await openRequest(selected._id);
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  async function forceAssignAgency() {
+    if (!selected) return;
+    setError('');
+    setMessage('');
+    try {
+      await api(`/api/admin/requests/${selected._id}/force-assign`, {
+        method: 'POST',
+        body: { agencyId },
+      });
+      setMessage('Force-assigned agency.');
       await load();
       await openRequest(selected._id);
     } catch (err) {
@@ -149,12 +171,21 @@ export default function AdminPage() {
               <div className="muted">
                 Client: {selected.clientId?.name || selected.clientId}
               </div>
+              {selected.assignedAgencyId ? (
+                <div className="muted">
+                  Agency: {selected.assignedAgency?.name || selected.assignedAgencyId?.name}
+                </div>
+              ) : null}
               <h3>Offer trail</h3>
               <div className="list">
                 {(selected.offers || []).map((o) => (
                   <div className="item row" key={o._id}>
                     <StatusBadge status={o.status} />
-                    <span>{o.cleanerId?.name || o.cleanerId}</span>
+                    <span>
+                      {o.kind === 'agency'
+                        ? o.agencyId?.name || o.agencyId
+                        : o.cleanerId?.name || o.cleanerId}
+                    </span>
                     <span className="muted">{o.distanceKm} km</span>
                   </div>
                 ))}
@@ -169,9 +200,22 @@ export default function AdminPage() {
                   ))}
                 </select>
               </label>
+              <label>
+                Force-assign agency
+                <select value={agencyId} onChange={(e) => setAgencyId(e.target.value)}>
+                  {agencies.map((a) => (
+                    <option key={a._id} value={a._id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
               <div className="row">
                 <button type="button" onClick={forceAssign}>
-                  Force assign
+                  Force assign cleaner
+                </button>
+                <button type="button" onClick={forceAssignAgency}>
+                  Force assign agency
                 </button>
                 <button className="danger" type="button" onClick={cancelSelected}>
                   Cancel request

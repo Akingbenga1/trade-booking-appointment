@@ -12,6 +12,7 @@ import requestRoutes from './routes/requests.js';
 import adminRoutes from './routes/admin.js';
 import notificationRoutes from './routes/notifications.js';
 import businessRoutes from './routes/businesses.js';
+import agencyRoutes from './routes/agencies.js';
 import placesRoutes from './routes/places.js';
 import paymentRoutes from './routes/payments.js';
 import { handleStripeWebhook } from './services/paymentService.js';
@@ -59,6 +60,7 @@ app.use('/api/requests', requestRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/businesses', businessRoutes);
+app.use('/api/agencies', agencyRoutes);
 app.use('/api/places', placesRoutes);
 app.use('/api/payments', paymentRoutes);
 

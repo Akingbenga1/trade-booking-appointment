@@ -2,6 +2,15 @@
  * Validate and normalize flat place fields used on cleaning requests and businesses.
  * @returns {{ address: string, latitude: number, longitude: number }}
  */
+
+/** Reject null/blank before Number() — Number(null) and Number('') both become 0. */
+function parseCoord(value) {
+  if (value == null || (typeof value === 'string' && value.trim() === '')) {
+    return NaN;
+  }
+  return Number(value);
+}
+
 export function parsePlaceFields({ address, latitude, longitude }) {
   const trimmed = String(address ?? '').trim();
   if (!trimmed) {
@@ -10,8 +19,8 @@ export function parsePlaceFields({ address, latitude, longitude }) {
     throw err;
   }
 
-  const lat = Number(latitude);
-  const lng = Number(longitude);
+  const lat = parseCoord(latitude);
+  const lng = parseCoord(longitude);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     const err = new Error('latitude and longitude must be numbers');
     err.status = 400;

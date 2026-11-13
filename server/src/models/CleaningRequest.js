@@ -1,28 +1,15 @@
 import mongoose from 'mongoose';
 
-const offerSchema = new mongoose.Schema(
-  {
-    cleanerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    distanceKm: { type: Number, required: true },
-    status: {
-      type: String,
-      enum: ['pending', 'accepted', 'rejected', 'ignored', 'closed'],
-      default: 'pending',
-    },
-    notifiedAt: { type: Date, default: Date.now },
-    expiresAt: { type: Date, required: true },
-    respondedAt: Date,
-  },
-  { _id: true }
-);
-
+/**
+ * Lean job header. Offers → request_offers; history → request_events;
+ * agency crew → job_assignments; staff pay → staff_job_pays.
+ */
 const cleaningRequestSchema = new mongoose.Schema(
   {
     // Person who posted (notifications / audit). Ownership for business jobs is businessId.
     clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     businessId: { type: mongoose.Schema.Types.ObjectId, ref: 'Business' },
     serviceDetails: { type: String, required: true },
-    // Preferred window (minute precision). preferredTime kept optional for legacy rows.
     scheduleStart: { type: Date, required: true },
     scheduleEnd: { type: Date, required: true },
     preferredTime: { type: Date, required: false },
@@ -43,21 +30,16 @@ const cleaningRequestSchema = new mongoose.Schema(
       ],
       default: 'open',
     },
+    // Independent cleaner path
     assignedCleanerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    offers: [offerSchema],
+    // Agency path pointers (details in related collections)
+    selectedAgencyId: { type: mongoose.Schema.Types.ObjectId, ref: 'CleaningAgency' },
+    assignedAgencyId: { type: mongoose.Schema.Types.ObjectId, ref: 'CleaningAgency' },
+    assignedStaffIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     matchingExpiresAt: Date,
     notifiedCleanerCount: { type: Number, default: 0 },
-    statusHistory: [
-      {
-        status: String,
-        at: { type: Date, default: Date.now },
-        by: String,
-        note: String,
-      },
-    ],
-    // Soft-delete: set when poster removes a cancelled request from "My requests".
+    notifiedAgencyCount: { type: Number, default: 0 },
     deletedAt: { type: Date, default: null },
-    // Soft-hide: set when poster archives a (typically paid) request; still visible to cleaners.
     archivedAt: { type: Date, default: null },
   },
   { timestamps: true }

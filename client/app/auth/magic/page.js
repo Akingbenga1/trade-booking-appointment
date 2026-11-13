@@ -31,6 +31,10 @@ function MagicLinkInner() {
         setSession(data.token, data.user);
         if (data.user.mustSetPassword || data.mustSetPassword) {
           router.replace('/auth/set-password');
+        } else if (data.user.role === 'cleaning_agency') {
+          router.replace('/agency');
+        } else if (data.user.role === 'agency_staff' || data.user.role === 'cleaner') {
+          router.replace('/cleaner');
         } else {
           router.replace('/client');
         }

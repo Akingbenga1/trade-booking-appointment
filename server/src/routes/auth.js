@@ -7,6 +7,7 @@ import {
   publicUser,
   registerBusinessRepresentative,
 } from '../services/businessService.js';
+import { registerCleaningAgency } from '../services/agencyService.js';
 
 const router = Router();
 
@@ -71,6 +72,36 @@ router.post('/register/business', async (req, res) => {
     });
   } catch (err) {
     console.error(`[auth] register/business FAIL: ${err.message}`);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/register/agency', async (req, res) => {
+  try {
+    const { name, email, agencyName, address, latitude, longitude, phone } = req.body;
+    const { user, agency } = await registerCleaningAgency({
+      name,
+      email,
+      agencyName,
+      address,
+      latitude,
+      longitude,
+      phone,
+    });
+    res.status(201).json({
+      ok: true,
+      message: 'Check your email for a link to finish signup and set your password.',
+      user: { id: user._id, email: user.email, role: user.role },
+      agency: {
+        id: agency._id,
+        name: agency.name,
+        phone: agency.phone,
+        address: agency.address,
+        latitude: agency.latitude,
+        longitude: agency.longitude,
+      },
+    });
+  } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });

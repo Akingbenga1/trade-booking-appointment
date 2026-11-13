@@ -1,9 +1,15 @@
 import { Router } from 'express';
 import { User } from '../models/User.js';
 import { CleaningRequest } from '../models/CleaningRequest.js';
+import { CleaningAgency } from '../models/CleaningAgency.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
-import { forceAssign, cancelRequest, notDeletedFilter } from '../services/requestService.js';
-import { attachPayToRequests } from '../services/jobPay.js';
+import {
+  forceAssign,
+  forceAssignAgency,
+  cancelRequest,
+  notDeletedFilter,
+  hydrateRequest,
+} from '../services/requestService.js';
 
 const router = Router();
 
@@ -13,9 +19,13 @@ router.get('/requests', async (_req, res) => {
   const list = await CleaningRequest.find(notDeletedFilter)
     .sort({ createdAt: -1 })
     .populate('clientId', 'name email')
-    .populate('assignedCleanerId', 'name email');
-  const plain = list.map((d) => d.toObject());
-  await attachPayToRequests(plain);
+    .populate('assignedCleanerId', 'name email')
+    .populate('assignedAgencyId', 'name')
+    .populate('assignedStaffIds', 'name email');
+  const plain = [];
+  for (const d of list) {
+    plain.push(await hydrateRequest(d, { includeOffers: true, populateOffers: true }));
+  }
   res.json(plain);
 });
 
@@ -23,16 +33,26 @@ router.get('/requests/:id', async (req, res) => {
   const doc = await CleaningRequest.findById(req.params.id)
     .populate('clientId', 'name email')
     .populate('assignedCleanerId', 'name email')
-    .populate('offers.cleanerId', 'name email');
+    .populate('assignedAgencyId', 'name')
+    .populate('assignedStaffIds', 'name email');
   if (!doc || doc.deletedAt) return res.status(404).json({ error: 'Not found' });
-  const plain = doc.toObject();
-  await attachPayToRequests(plain);
-  res.json(plain);
+  res.json(
+    await hydrateRequest(doc, {
+      includeOffers: true,
+      includeEvents: true,
+      populateOffers: true,
+    })
+  );
 });
 
 router.get('/users', async (_req, res) => {
   const users = await User.find().select('-passwordHash').sort({ role: 1, name: 1 });
   res.json(users);
+});
+
+router.get('/agencies', async (_req, res) => {
+  const agencies = await CleaningAgency.find().sort({ name: 1 });
+  res.json(agencies);
 });
 
 router.patch('/users/:id', async (req, res) => {
@@ -45,13 +65,16 @@ router.patch('/users/:id', async (req, res) => {
 
     if (typeof req.body.isDisabled === 'boolean') {
       user.isDisabled = req.body.isDisabled;
-      if (user.isDisabled && user.role === 'cleaner') {
+      if (user.isDisabled && (user.role === 'cleaner' || user.role === 'agency_staff')) {
         user.isAvailable = false;
       }
     }
-    if (user.role === 'cleaner' && typeof req.body.isAvailable === 'boolean') {
+    if (
+      (user.role === 'cleaner' || user.role === 'agency_staff') &&
+      typeof req.body.isAvailable === 'boolean'
+    ) {
       if (req.body.isAvailable && !user.currentLocation?.lat) {
-        return res.status(400).json({ error: 'Cleaner needs a location before going live' });
+        return res.status(400).json({ error: 'Needs a location before going live' });
       }
       user.isAvailable = req.body.isAvailable;
     }
@@ -67,8 +90,12 @@ router.patch('/users/:id', async (req, res) => {
 
 router.post('/requests/:id/force-assign', async (req, res) => {
   try {
-    const { cleanerId } = req.body;
-    if (!cleanerId) return res.status(400).json({ error: 'cleanerId required' });
+    const { cleanerId, agencyId } = req.body;
+    if (agencyId) {
+      const request = await forceAssignAgency(req.params.id, agencyId, req.user.id);
+      return res.json(request);
+    }
+    if (!cleanerId) return res.status(400).json({ error: 'cleanerId or agencyId required' });
     const request = await forceAssign(req.params.id, cleanerId, req.user.id);
     res.json(request);
   } catch (err) {

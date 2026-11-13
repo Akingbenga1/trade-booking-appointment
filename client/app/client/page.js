@@ -17,6 +17,7 @@ import {
   formatGbp,
   formatPaySummary,
 } from '../../lib/jobPay';
+import { hasPlacePin } from '../../lib/place';
 
 const DEFAULT_PLACE = {
   address: '',
@@ -103,11 +104,7 @@ export default function ClientPage() {
       setError('Choose a start and end date/time on the calendar');
       return;
     }
-    if (
-      !place.address?.trim() ||
-      !Number.isFinite(Number(place.latitude)) ||
-      !Number.isFinite(Number(place.longitude))
-    ) {
+    if (!hasPlacePin(place)) {
       setError('Pick an address from the suggestions (or set the map pin)');
       return;
     }
@@ -200,11 +197,7 @@ export default function ClientPage() {
       nextDetails = next.trim();
     } else {
       nextDetails = serviceDetails || currentDetails;
-      if (
-        !place.address?.trim() ||
-        !Number.isFinite(Number(place.latitude)) ||
-        !Number.isFinite(Number(place.longitude))
-      ) {
+      if (!hasPlacePin(place)) {
         setError('Pick an address from the suggestions before rematching');
         return;
       }
@@ -353,7 +346,10 @@ export default function ClientPage() {
                 <div className="row">
                   <StatusBadge status={r.status} />
                   <span className="muted">
-                    Notified: {r.notifiedCleanerCount ?? 0}
+                    Notified: {r.notifiedCleanerCount ?? 0} cleaners
+                    {r.notifiedAgencyCount != null
+                      ? ` · ${r.notifiedAgencyCount} agencies`
+                      : ''}
                   </span>
                   {r.businessId?.name ? (
                     <span className="muted">{r.businessId.name}</span>
@@ -378,8 +374,21 @@ export default function ClientPage() {
                 ) : null}
                 {r.assignedCleanerId ? (
                   <div className="muted">
-                    Assigned: {r.assignedCleanerId.name || r.assignedCleanerId}
+                    Assigned cleaner: {r.assignedCleanerId.name || r.assignedCleanerId}
                   </div>
+                ) : null}
+                {r.assignedAgencyId ? (
+                  <div className="muted">
+                    Agency: {r.assignedAgency?.name || r.assignedAgencyId?.name || r.assignedAgencyId}
+                    {r.assignedStaffIds?.length
+                      ? ` · Staff: ${r.assignedStaffIds
+                          .map((s) => s.name || s)
+                          .join(', ')}`
+                      : ''}
+                  </div>
+                ) : null}
+                {r.status === 'open' ? (
+                  <AgencyInterestPicker requestId={r._id} onPicked={load} />
                 ) : null}
                 {r.status === 'open' || r.status === 'unmatched' ? (
                   <div className="row">
@@ -445,3 +454,57 @@ export default function ClientPage() {
     </div>
   );
 }
+
+function AgencyInterestPicker({ requestId, onPicked }) {
+  const [interests, setInterests] = useState([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await api(`/api/requests/${requestId}/interests`);
+        if (!cancelled) setInterests(list.filter((i) => i.status === 'interested'));
+      } catch {
+        if (!cancelled) setInterests([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [requestId]);
+
+  async function pick(agencyId) {
+    setError('');
+    try {
+      await api(`/api/requests/${requestId}/pick-agency`, {
+        method: 'POST',
+        body: { agencyId },
+      });
+      await onPicked();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  if (!interests.length) return null;
+
+  return (
+    <div className="stack">
+      <div className="muted">Interested agencies — pick one:</div>
+      {error ? <div className="error">{error}</div> : null}
+      <div className="row" style={{ flexWrap: 'wrap' }}>
+        {interests.map((i) => (
+          <button
+            key={String(i._id)}
+            type="button"
+            onClick={() => pick(i.agencyId?._id || i.agencyId)}
+          >
+            Pick {i.agencyId?.name || 'agency'}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+

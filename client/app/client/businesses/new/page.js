@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '../../../../lib/api';
+import { hasPlacePin } from '../../../../lib/place';
 import { TopBar, useRequireRole } from '../../../../components/ui';
 import LocationPicker from '../../../../components/LocationPicker';
 
@@ -26,11 +27,7 @@ export default function AddBusinessPage() {
 
   async function onSubmit(e) {
     e.preventDefault();
-    if (
-      !place.address?.trim() ||
-      !Number.isFinite(Number(place.latitude)) ||
-      !Number.isFinite(Number(place.longitude))
-    ) {
+    if (!hasPlacePin(place)) {
       setError('Pick a premises address from the suggestions (or set the map pin)');
       return;
     }

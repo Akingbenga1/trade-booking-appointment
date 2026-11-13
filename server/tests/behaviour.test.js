@@ -8,8 +8,11 @@ import { User } from '../src/models/User.js';
 import { CleaningRequest } from '../src/models/CleaningRequest.js';
 import { Notification } from '../src/models/Notification.js';
 import { Business } from '../src/models/Business.js';
+import { BusinessMembership } from '../src/models/BusinessMembership.js';
 import { BusinessPayment } from '../src/models/BusinessPayment.js';
 import { Transaction } from '../src/models/Transaction.js';
+import { RequestOffer } from '../src/models/RequestOffer.js';
+import { RequestEvent } from '../src/models/RequestEvent.js';
 import {
   createCleaningRequest,
   respondToOffer,
@@ -30,6 +33,14 @@ import bcrypt from 'bcryptjs';
 import { config } from '../src/config.js';
 
 const hub = { lat: 51.5074, lng: -0.1278 };
+
+async function offersFor(requestId) {
+  return RequestOffer.find({ requestId, kind: 'cleaner' });
+}
+
+function cleanerActor(user) {
+  return { id: user._id.toString(), role: 'cleaner' };
+}
 
 async function makeUser(overrides) {
   return User.create({
@@ -52,7 +63,7 @@ describe('system-behviour.md core rules', () => {
   before(async () => {
     // Real MongoDB only — uses a dedicated test database
     process.env.MONGO_URI =
-      process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/trade_booking_test';
+      process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/trade_booking_test_behaviour';
     delete process.env.MEMORY_MONGO;
     config.mongoUri = process.env.MONGO_URI;
     await connectDb();
@@ -61,8 +72,11 @@ describe('system-behviour.md core rules', () => {
       CleaningRequest.deleteMany({}),
       Notification.deleteMany({}),
       Business.deleteMany({}),
+      BusinessMembership.deleteMany({}),
       BusinessPayment.deleteMany({}),
       Transaction.deleteMany({}),
+      RequestOffer.deleteMany({}),
+      RequestEvent.deleteMany({}),
     ]);
 
     client = await makeUser({ name: 'Client', email: 't-client@test.com', role: 'client' });
@@ -105,10 +119,11 @@ describe('system-behviour.md core rules', () => {
 
     assert.equal(req.status, 'open');
     assert.equal(req.notifiedCleanerCount, 2);
-    const ids = req.offers.map((o) => String(o.cleanerId)).sort();
+    const cleanerOffers = (req.offers || []).filter((o) => o.kind === 'cleaner' || o.cleanerId);
+    const ids = cleanerOffers.map((o) => String(o.cleanerId?._id || o.cleanerId)).sort();
     assert.deepEqual(ids, [String(cleanerA._id), String(cleanerB._id)].sort());
     assert.ok(!ids.includes(String(cleanerFar._id)));
-    assert.ok(req.offers.every((o) => o.status === 'pending'));
+    assert.ok(cleanerOffers.every((o) => o.status === 'pending'));
 
     const notes = await Notification.find({ type: 'new_offer', requestId: req._id });
     assert.equal(notes.length, 2);
@@ -143,19 +158,21 @@ describe('system-behviour.md core rules', () => {
     await respondToOffer(req._id, cleanerB._id, 'reject');
     let fresh = await CleaningRequest.findById(req._id);
     assert.equal(fresh.status, 'open');
-    const bOffer = fresh.offers.find((o) => String(o.cleanerId) === String(cleanerB._id));
+    let offerRows = await offersFor(req._id);
+    const bOffer = offerRows.find((o) => String(o.cleanerId) === String(cleanerB._id));
     assert.equal(bOffer.status, 'rejected');
 
     await respondToOffer(req._id, cleanerA._id, 'accept');
     fresh = await CleaningRequest.findById(req._id);
     assert.equal(fresh.status, 'assigned');
     assert.equal(String(fresh.assignedCleanerId), String(cleanerA._id));
+    offerRows = await offersFor(req._id);
     assert.equal(
-      fresh.offers.find((o) => String(o.cleanerId) === String(cleanerA._id)).status,
+      offerRows.find((o) => String(o.cleanerId) === String(cleanerA._id)).status,
       'accepted'
     );
     assert.equal(
-      fresh.offers.find((o) => String(o.cleanerId) === String(cleanerB._id)).status,
+      offerRows.find((o) => String(o.cleanerId) === String(cleanerB._id)).status,
       'rejected'
     );
 
@@ -217,15 +234,15 @@ describe('system-behviour.md core rules', () => {
       /before a cleaner is locked in/i
     );
 
-    let r = await advanceBooking(req._id, cleanerA._id, 'en_route');
+    let r = await advanceBooking(req._id, cleanerActor(cleanerA), 'en_route');
     assert.equal(r.status, 'en_route');
-    r = await advanceBooking(req._id, cleanerA._id, 'on_site');
-    r = await advanceBooking(req._id, cleanerA._id, 'in_progress');
-    r = await advanceBooking(req._id, cleanerA._id, 'completed');
+    r = await advanceBooking(req._id, cleanerActor(cleanerA), 'on_site');
+    r = await advanceBooking(req._id, cleanerActor(cleanerA), 'in_progress');
+    r = await advanceBooking(req._id, cleanerActor(cleanerA), 'completed');
     assert.equal(r.status, 'completed');
 
     await assert.rejects(
-      () => advanceBooking(req._id, cleanerB._id, 'en_route'),
+      () => advanceBooking(req._id, cleanerActor(cleanerB), 'en_route'),
       /Only the assigned cleaner/i
     );
   });
@@ -241,7 +258,8 @@ describe('system-behviour.md core rules', () => {
     const assigned = await forceAssign(req._id, cleanerB._id, admin._id);
     assert.equal(assigned.status, 'assigned');
     assert.equal(String(assigned.assignedCleanerId), String(cleanerB._id));
-    assert.ok(assigned.offers.every((o) => o.status !== 'pending'));
+    const forceOffers = await offersFor(req._id);
+    assert.ok(forceOffers.every((o) => o.status !== 'pending'));
 
     const cancelled = await cancelRequest(req._id, {
       id: admin._id.toString(),
@@ -265,7 +283,8 @@ describe('system-behviour.md core rules', () => {
     await processExpiries();
     const fresh = await CleaningRequest.findById(req._id);
     assert.equal(fresh.status, 'unmatched');
-    assert.ok(fresh.offers.every((o) => o.status === 'ignored' || o.status === 'closed'));
+    const expiredOffers = await offersFor(req._id);
+    assert.ok(expiredOffers.every((o) => o.status === 'ignored' || o.status === 'closed'));
   });
 
   it('offer timer expiry marks offer ignored while request can stay open', async () => {
@@ -279,19 +298,18 @@ describe('system-behviour.md core rules', () => {
     // Keep matching window alive; expire only cleanerA offer
     await CleaningRequest.updateOne(
       { _id: req._id },
-      {
-        $set: {
-          matchingExpiresAt: new Date(Date.now() + 600_000),
-          'offers.$[a].expiresAt': new Date(Date.now() - 1000),
-        },
-      },
-      { arrayFilters: [{ 'a.cleanerId': cleanerA._id }] }
+      { $set: { matchingExpiresAt: new Date(Date.now() + 600_000) } }
+    );
+    await RequestOffer.updateOne(
+      { requestId: req._id, cleanerId: cleanerA._id },
+      { $set: { expiresAt: new Date(Date.now() - 1000) } }
     );
     await processExpiries();
     const fresh = await CleaningRequest.findById(req._id);
     assert.equal(fresh.status, 'open');
+    const offerRows = await offersFor(req._id);
     assert.equal(
-      fresh.offers.find((o) => String(o.cleanerId) === String(cleanerA._id)).status,
+      offerRows.find((o) => String(o.cleanerId) === String(cleanerA._id)).status,
       'ignored'
     );
   });
@@ -382,8 +400,12 @@ describe('system-behviour.md core rules', () => {
       address: '1 Archive St',
       latitude: hub.lat,
       longitude: hub.lng,
-      memberIds: [user._id],
       createdBy: user._id,
+    });
+    await BusinessMembership.create({
+      businessId: business._id,
+      userId: user._id,
+      memberRole: 'owner',
     });
     const scheduleStart = new Date('2030-06-01T09:00:00.000Z');
     const scheduleEnd = new Date('2030-06-02T17:00:00.000Z');

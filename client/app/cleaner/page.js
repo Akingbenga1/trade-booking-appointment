@@ -16,7 +16,8 @@ const NEXT_STEP = {
 };
 
 export default function CleanerPage() {
-  const user = useRequireRole('cleaner');
+  const user = useRequireRole(['cleaner', 'agency_staff']);
+  const isStaff = user?.role === 'agency_staff';
   const [available, setAvailable] = useState(false);
   const [lat, setLat] = useState(HUB.lat + 0.01);
   const [lng, setLng] = useState(HUB.lng + 0.01);
@@ -26,19 +27,29 @@ export default function CleanerPage() {
   const [message, setMessage] = useState('');
 
   const load = useCallback(async () => {
-    const [offerList, assignedList, me] = await Promise.all([
-      api('/api/requests/offers'),
-      api('/api/requests/assigned'),
-      api('/api/auth/me'),
-    ]);
-    setOffers(offerList);
-    setAssigned(assignedList);
-    setAvailable(Boolean(me.isAvailable));
-    if (me.currentLocation?.lat != null) {
-      setLat(me.currentLocation.lat);
-      setLng(me.currentLocation.lng);
+    const tasks = [api('/api/requests/assigned'), api('/api/auth/me')];
+    if (!isStaff) tasks.unshift(api('/api/requests/offers'));
+    const results = await Promise.all(tasks);
+    if (isStaff) {
+      setOffers([]);
+      setAssigned(results[0]);
+      const me = results[1];
+      setAvailable(Boolean(me.isAvailable));
+      if (me.currentLocation?.lat != null) {
+        setLat(me.currentLocation.lat);
+        setLng(me.currentLocation.lng);
+      }
+    } else {
+      setOffers(results[0]);
+      setAssigned(results[1]);
+      const me = results[2];
+      setAvailable(Boolean(me.isAvailable));
+      if (me.currentLocation?.lat != null) {
+        setLat(me.currentLocation.lat);
+        setLng(me.currentLocation.lng);
+      }
     }
-  }, []);
+  }, [isStaff]);
 
   useEffect(() => {
     if (!user) return;
@@ -99,6 +110,21 @@ export default function CleanerPage() {
     }
   }
 
+  async function staffRespond(id, action) {
+    setError('');
+    setMessage('');
+    try {
+      await api(`/api/requests/${id}/staff-respond`, {
+        method: 'POST',
+        body: { action },
+      });
+      setMessage(action === 'confirm' ? 'Confirmed.' : 'Declined.');
+      await load();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
   if (!user) return null;
 
   const pending = offers.filter((o) => o.offer?.status === 'pending');
@@ -106,7 +132,7 @@ export default function CleanerPage() {
 
   return (
     <div className="shell">
-      <TopBar title="Cleaner" />
+      <TopBar title={isStaff ? 'Agency staff' : 'Cleaner'} />
       <div className="card stack">
         <h2>Availability</h2>
         <div className="row">
@@ -134,6 +160,7 @@ export default function CleanerPage() {
         {error ? <div className="error">{error}</div> : null}
       </div>
 
+      {!isStaff ? (
       <div className="card stack" style={{ marginTop: 16 }}>
         <h2>Nearby offers (open board)</h2>
         <div className="list">
@@ -176,6 +203,7 @@ export default function CleanerPage() {
           ))}
         </div>
       </div>
+      ) : null}
 
       <div className="grid grid-2" style={{ marginTop: 16 }}>
         <div className="card stack">
@@ -198,7 +226,21 @@ export default function CleanerPage() {
                 {r.pay ? (
                   <div className="muted">Pay: {formatPaySummary(r.pay)}</div>
                 ) : null}
-                {NEXT_STEP[r.status] ? (
+                {isStaff && r.myAssignment?.confirmStatus === 'pending' ? (
+                  <div className="row">
+                    <button type="button" onClick={() => staffRespond(r._id, 'confirm')}>
+                      Confirm assignment
+                    </button>
+                    <button
+                      className="secondary"
+                      type="button"
+                      onClick={() => staffRespond(r._id, 'decline')}
+                    >
+                      Decline
+                    </button>
+                  </div>
+                ) : null}
+                {!isStaff && NEXT_STEP[r.status] ? (
                   <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>
                     Mark {NEXT_STEP[r.status].replaceAll('_', ' ')}
                   </button>
@@ -207,6 +249,7 @@ export default function CleanerPage() {
             ))}
           </div>
         </div>
+        {!isStaff ? (
         <div className="card stack">
           <h2>Offer history</h2>
           <div className="list">
@@ -218,6 +261,7 @@ export default function CleanerPage() {
             ))}
           </div>
         </div>
+        ) : null}
       </div>
     </div>
   );

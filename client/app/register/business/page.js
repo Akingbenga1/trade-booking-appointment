@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, clearSession, getStoredUser } from '../../../lib/api';
+import { hasPlacePin } from '../../../lib/place';
 import LocationPicker from '../../../components/LocationPicker';
 
 export default function BusinessRegisterPage() {
@@ -36,11 +37,7 @@ export default function BusinessRegisterPage() {
 
   async function onSubmit(e) {
     e.preventDefault();
-    if (
-      !place.address?.trim() ||
-      !Number.isFinite(Number(place.latitude)) ||
-      !Number.isFinite(Number(place.longitude))
-    ) {
+    if (!hasPlacePin(place)) {
       setError('Pick a premises address from the suggestions (or set the map pin)');
       return;
     }

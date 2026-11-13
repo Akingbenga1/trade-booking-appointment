@@ -19,4 +19,5 @@ client/.env.local
 
 # Local behaviour notes — not committed.
 System-Behaviour/
+.cursor/
 

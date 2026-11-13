@@ -4,7 +4,11 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
-router.post('/availability', requireAuth, requireRole('cleaner'), async (req, res) => {
+router.post(
+  '/availability',
+  requireAuth,
+  requireRole('cleaner', 'agency_staff'),
+  async (req, res) => {
   try {
     const { isAvailable, lat, lng } = req.body;
     const user = await User.findById(req.user.id);
@@ -27,9 +31,14 @@ router.post('/availability', requireAuth, requireRole('cleaner'), async (req, re
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+  }
+);
 
-router.post('/location', requireAuth, requireRole('cleaner'), async (req, res) => {
+router.post(
+  '/location',
+  requireAuth,
+  requireRole('cleaner', 'agency_staff'),
+  async (req, res) => {
   try {
     const { lat, lng } = req.body;
     if (typeof lat !== 'number' || typeof lng !== 'number') {
@@ -42,6 +51,7 @@ router.post('/location', requireAuth, requireRole('cleaner'), async (req, res) =
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+  }
+);
 
 export default router;

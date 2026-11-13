@@ -10,10 +10,12 @@ import { connectDb, disconnectDb } from '../src/db.js';
 import { User } from '../src/models/User.js';
 import { CleaningRequest } from '../src/models/CleaningRequest.js';
 import { Business } from '../src/models/Business.js';
+import { BusinessMembership } from '../src/models/BusinessMembership.js';
 import { BusinessPayment } from '../src/models/BusinessPayment.js';
 import { Transaction } from '../src/models/Transaction.js';
 import { Notification } from '../src/models/Notification.js';
-import { registerBusinessRepresentative } from '../src/services/businessService.js';
+import { RequestOffer } from '../src/models/RequestOffer.js';
+import { RequestEvent } from '../src/models/RequestEvent.js';
 import { MINIMUM_WAGE_PER_HOUR } from '../src/services/jobPay.js';
 import { signToken } from '../src/middleware/auth.js';
 import requestsRouter from '../src/routes/requests.js';
@@ -21,6 +23,30 @@ import { config } from '../src/config.js';
 import bcrypt from 'bcryptjs';
 
 const hub = { lat: 51.5074, lng: -0.1278 };
+
+async function makeBusinessUser(label) {
+  const stamp = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const user = await User.create({
+    name: `${label} Owner`,
+    email: `${label}-${stamp}@test.com`,
+    passwordHash: await bcrypt.hash('x', 8),
+    role: 'business',
+  });
+  const business = await Business.create({
+    name: `${label} Co`,
+    phone: '+441234567890',
+    address: `1 ${label} Street, London`,
+    latitude: hub.lat,
+    longitude: hub.lng,
+    createdBy: user._id,
+  });
+  await BusinessMembership.create({
+    businessId: business._id,
+    userId: user._id,
+    memberRole: 'owner',
+  });
+  return { user, business };
+}
 
 function futureSchedule(hoursFromNow = 24, durationHours = 8) {
   const scheduleStart = new Date(Date.now() + hoursFromNow * 3600_000);
@@ -101,7 +127,7 @@ describe('business add cleaning need — negative', () => {
 
   before(async () => {
     process.env.MONGO_URI =
-      process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/trade_booking_test';
+      process.env.MONGO_URI_TEST || 'mongodb://127.0.0.1:27017/trade_booking_test_bizneg';
     config.mongoUri = process.env.MONGO_URI;
     await connectDb();
     ({ server, base } = await startApp());
@@ -117,32 +143,19 @@ describe('business add cleaning need — negative', () => {
       User.deleteMany({}),
       CleaningRequest.deleteMany({}),
       Business.deleteMany({}),
+      BusinessMembership.deleteMany({}),
       BusinessPayment.deleteMany({}),
       Transaction.deleteMany({}),
       Notification.deleteMany({}),
+      RequestOffer.deleteMany({}),
+      RequestEvent.deleteMany({}),
     ]);
 
-    const reg = await registerBusinessRepresentative({
-      name: 'Biz Owner',
-      email: `biz-neg-${Date.now()}@test.com`,
-      businessName: 'Neg Test Co',
-      address: '1 Test Street, London',
-      latitude: hub.lat,
-      longitude: hub.lng,
-      phone: '+441234567890',
-    });
-    businessUser = reg.user;
-    business = reg.business;
+    const mine = await makeBusinessUser('biz-neg');
+    businessUser = mine.user;
+    business = mine.business;
 
-    const other = await registerBusinessRepresentative({
-      name: 'Other Owner',
-      email: `other-neg-${Date.now()}@test.com`,
-      businessName: 'Other Co',
-      address: '2 Other Street, London',
-      latitude: hub.lat,
-      longitude: hub.lng,
-      phone: '+449876543210',
-    });
+    const other = await makeBusinessUser('other-neg');
     otherBusiness = other.business;
 
     cleaner = await makeUser({
@@ -234,6 +247,28 @@ describe('business add cleaning need — negative', () => {
       method: 'POST',
       token: bizToken,
       body: validBody(business._id, { latitude: 'north', longitude: 'east' }),
+    });
+    assert.equal(res.status, 400);
+    assert.match(String(res.json?.error || ''), /latitude|longitude/i);
+    await assertNoRequestCreated();
+  });
+
+  it('rejects null coordinates (must not coerce to 0,0)', async () => {
+    const res = await api(base, '/api/requests', {
+      method: 'POST',
+      token: bizToken,
+      body: validBody(business._id, { latitude: null, longitude: null }),
+    });
+    assert.equal(res.status, 400);
+    assert.match(String(res.json?.error || ''), /latitude|longitude/i);
+    await assertNoRequestCreated();
+  });
+
+  it('rejects blank-string coordinates (must not coerce to 0,0)', async () => {
+    const res = await api(base, '/api/requests', {
+      method: 'POST',
+      token: bizToken,
+      body: validBody(business._id, { latitude: '', longitude: '  ' }),
     });
     assert.equal(res.status, 400);
     assert.match(String(res.json?.error || ''), /latitude|longitude/i);

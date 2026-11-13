@@ -5,6 +5,16 @@ import { Notification } from './models/Notification.js';
 import { NotificationJob } from './models/NotificationJob.js';
 import { PushDevice } from './models/PushDevice.js';
 import { Business } from './models/Business.js';
+import { BusinessMembership } from './models/BusinessMembership.js';
+import { CleaningAgency } from './models/CleaningAgency.js';
+import { AgencyMembership } from './models/AgencyMembership.js';
+import { RequestOffer } from './models/RequestOffer.js';
+import { RequestEvent } from './models/RequestEvent.js';
+import { AgencyJobInterest } from './models/AgencyJobInterest.js';
+import { JobAssignment } from './models/JobAssignment.js';
+import { StaffJobPay } from './models/StaffJobPay.js';
+import { BusinessPayment } from './models/BusinessPayment.js';
+import { Transaction } from './models/Transaction.js';
 
 const password = 'password123';
 
@@ -34,6 +44,16 @@ export async function seedDemo({ reset = true } = {}) {
       NotificationJob.deleteMany({}),
       PushDevice.deleteMany({}),
       Business.deleteMany({}),
+      BusinessMembership.deleteMany({}),
+      CleaningAgency.deleteMany({}),
+      AgencyMembership.deleteMany({}),
+      RequestOffer.deleteMany({}),
+      RequestEvent.deleteMany({}),
+      AgencyJobInterest.deleteMany({}),
+      JobAssignment.deleteMany({}),
+      StaffJobPay.deleteMany({}),
+      BusinessPayment.deleteMany({}),
+      Transaction.deleteMany({}),
       User.deleteMany({}),
     ]);
   }
@@ -45,7 +65,6 @@ export async function seedDemo({ reset = true } = {}) {
     email: 'client@demo.com',
     role: 'client',
   });
-  // Businesses are created only via /register/business — not seeded.
   await upsertUser({
     name: 'Cleaner One',
     email: 'cleaner1@demo.com',
@@ -72,6 +91,38 @@ export async function seedDemo({ reset = true } = {}) {
     email: 'admin@demo.com',
     role: 'admin',
   });
+
+  const agencyOwner = await upsertUser({
+    name: 'Agency Owner',
+    email: 'agency@demo.com',
+    role: 'cleaning_agency',
+  });
+  const agency = await CleaningAgency.create({
+    name: 'Demo Cleaning Agency',
+    phone: '+440200000000',
+    address: '10 Agency Road, London',
+    latitude: hub.lat,
+    longitude: hub.lng,
+    createdBy: agencyOwner._id,
+  });
+  await AgencyMembership.create({
+    agencyId: agency._id,
+    userId: agencyOwner._id,
+    memberRole: 'owner',
+  });
+
+  const staff = await upsertUser({
+    name: 'Agency Staff One',
+    email: 'staff1@demo.com',
+    role: 'agency_staff',
+    isAvailable: true,
+    currentLocation: { lat: hub.lat + 0.005, lng: hub.lng - 0.005, updatedAt: new Date() },
+  });
+  await AgencyMembership.create({
+    agencyId: agency._id,
+    userId: staff._id,
+    memberRole: 'staff',
+  });
 }
 
 async function runCli() {
@@ -83,7 +134,9 @@ async function runCli() {
   console.log('  cleaner1@demo.com / cleaner2@demo.com (nearby, available)');
   console.log('  cleaner-far@demo.com (available but far)');
   console.log('  admin@demo.com');
-  console.log('  (no business seed — use /register/business)');
+  console.log('  agency@demo.com (cleaning agency)');
+  console.log('  staff1@demo.com (agency staff)');
+  console.log('  (businesses: use /register/business)');
   await disconnectDb();
 }
 

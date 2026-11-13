@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { CleaningRequest } from '../models/CleaningRequest.js';
+import { RequestOffer } from '../models/RequestOffer.js';
+import { JobAssignment } from '../models/JobAssignment.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
   createCleaningRequest,
@@ -11,8 +13,17 @@ import {
   updateOpenRequest,
   notDeletedFilter,
   activeForPosterFilter,
+  hydrateRequest,
+  expressAgencyInterest,
+  pickAgencyForRequest,
+  agencyAcceptRequest,
+  assignAgencyStaff,
+  reassignAgencyStaff,
+  staffRespondToAssignment,
+  listInterestsForRequest,
 } from '../services/requestService.js';
 import { isBusinessMember, listBusinessesForUser } from '../services/businessService.js';
+import { isAgencyMember } from '../services/agencyService.js';
 import { attachPayToRequests } from '../services/jobPay.js';
 import { parsePlaceFields } from '../services/place.js';
 
@@ -80,9 +91,13 @@ router.get('/mine', requireAuth, requireRole('client', 'business'), async (req, 
   const list = await CleaningRequest.find({ ...filter, ...activeForPosterFilter })
     .sort({ createdAt: -1 })
     .populate('assignedCleanerId', 'name email')
+    .populate('assignedAgencyId', 'name')
+    .populate('assignedStaffIds', 'name email')
     .populate('businessId', 'name');
-  const plain = list.map((d) => d.toObject());
-  await attachPayToRequests(plain);
+  const plain = [];
+  for (const d of list) {
+    plain.push(await hydrateRequest(d));
+  }
   res.json(plain);
 });
 
@@ -95,27 +110,38 @@ router.get('/archived', requireAuth, requireRole('client', 'business'), async (r
   })
     .sort({ archivedAt: -1 })
     .populate('assignedCleanerId', 'name email')
+    .populate('assignedAgencyId', 'name')
+    .populate('assignedStaffIds', 'name email')
     .populate('businessId', 'name');
-  const plain = list.map((d) => d.toObject());
-  await attachPayToRequests(plain);
+  const plain = [];
+  for (const d of list) {
+    plain.push(await hydrateRequest(d));
+  }
   res.json(plain);
 });
 
 router.get('/offers', requireAuth, requireRole('cleaner'), async (req, res) => {
-  const list = await CleaningRequest.find({
+  const offers = await RequestOffer.find({
+    kind: 'cleaner',
+    cleanerId: req.user.id,
+  }).sort({ createdAt: -1 });
+
+  const requestIds = offers.map((o) => o.requestId);
+  const requests = await CleaningRequest.find({
+    _id: { $in: requestIds },
     ...notDeletedFilter,
-    'offers.cleanerId': req.user.id,
   })
-    .sort({ createdAt: -1 })
     .populate('clientId', 'name email')
     .populate('businessId', 'name');
+  const byId = new Map(requests.map((r) => [String(r._id), r]));
 
-  const plainDocs = list.map((doc) => doc.toObject());
-  await attachPayToRequests(plainDocs);
-
-  const shaped = plainDocs.map((doc) => {
-    const offer = doc.offers.find((o) => String(o.cleanerId) === req.user.id);
-    return {
+  const shaped = [];
+  for (const offer of offers) {
+    const doc = byId.get(String(offer.requestId));
+    if (!doc) continue;
+    const plain = doc.toObject();
+    await attachPayToRequests(plain);
+    shaped.push({
       request: {
         id: doc._id,
         serviceDetails: doc.serviceDetails,
@@ -130,39 +156,76 @@ router.get('/offers', requireAuth, requireRole('cleaner'), async (req, res) => {
         client: doc.clientId,
         business: doc.businessId,
         createdAt: doc.createdAt,
-        pay: doc.pay || null,
+        pay: plain.pay || null,
       },
-      offer: offer
-        ? {
-            id: offer._id,
-            status: offer.status,
-            distanceKm: offer.distanceKm,
-            expiresAt: offer.expiresAt,
-            notifiedAt: offer.notifiedAt,
-            respondedAt: offer.respondedAt,
-          }
-        : null,
-    };
-  });
+      offer: {
+        id: offer._id,
+        status: offer.status,
+        distanceKm: offer.distanceKm,
+        expiresAt: offer.expiresAt,
+        notifiedAt: offer.notifiedAt,
+        respondedAt: offer.respondedAt,
+      },
+    });
+  }
   res.json(shaped);
 });
 
-router.get('/assigned', requireAuth, requireRole('cleaner'), async (req, res) => {
-  const list = await CleaningRequest.find({
+router.get('/assigned', requireAuth, requireRole('cleaner', 'agency_staff'), async (req, res) => {
+  let list;
+  if (req.user.role === 'agency_staff') {
+    const assignments = await JobAssignment.find({
+      staffUserId: req.user.id,
+      confirmStatus: { $in: ['pending', 'confirmed'] },
+    });
+    const ids = assignments.map((a) => a.requestId);
+    list = await CleaningRequest.find({
+      ...notDeletedFilter,
+      _id: { $in: ids },
+      status: { $in: ['assigned', 'en_route', 'on_site', 'in_progress', 'completed'] },
+    }).sort({ updatedAt: -1 });
+    const plain = [];
+    for (const d of list) {
+      const h = await hydrateRequest(d);
+      h.myAssignment = assignments.find((a) => String(a.requestId) === String(d._id));
+      plain.push(h);
+    }
+    return res.json(plain);
+  }
+
+  list = await CleaningRequest.find({
     ...notDeletedFilter,
     assignedCleanerId: req.user.id,
     status: { $in: ['assigned', 'en_route', 'on_site', 'in_progress', 'completed'] },
   }).sort({ updatedAt: -1 });
-  const plain = list.map((d) => d.toObject());
-  await attachPayToRequests(plain);
+  const plain = [];
+  for (const d of list) {
+    plain.push(await hydrateRequest(d));
+  }
   res.json(plain);
+});
+
+router.get('/:id/interests', requireAuth, requireRole('client', 'business', 'admin'), async (req, res) => {
+  try {
+    const doc = await CleaningRequest.findById(req.params.id);
+    if (!doc || doc.deletedAt) return res.status(404).json({ error: 'Not found' });
+    const isAdmin = req.user.role === 'admin';
+    const isClient = String(doc.clientId) === req.user.id;
+    const isBiz =
+      doc.businessId && (await isBusinessMember(req.user.id, doc.businessId));
+    if (!isAdmin && !isClient && !isBiz) return res.status(403).json({ error: 'Forbidden' });
+    res.json(await listInterestsForRequest(doc._id));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 router.get('/:id', requireAuth, async (req, res) => {
   const doc = await CleaningRequest.findById(req.params.id)
     .populate('clientId', 'name email')
     .populate('assignedCleanerId', 'name email')
-    .populate('offers.cleanerId', 'name email')
+    .populate('assignedAgencyId', 'name phone')
+    .populate('assignedStaffIds', 'name email')
     .populate('businessId', 'name');
   if (!doc || doc.deletedAt) return res.status(404).json({ error: 'Not found' });
 
@@ -171,27 +234,51 @@ router.get('/:id', requireAuth, async (req, res) => {
   const isBizMember =
     doc.businessId &&
     (await isBusinessMember(req.user.id, doc.businessId._id || doc.businessId));
-  const isAssigned =
+  const isAssignedCleaner =
     doc.assignedCleanerId &&
     String(doc.assignedCleanerId._id || doc.assignedCleanerId) === req.user.id;
-  const isOffered = doc.offers.some(
-    (o) => String(o.cleanerId._id || o.cleanerId) === req.user.id
-  );
+  const offer = await RequestOffer.findOne({
+    requestId: doc._id,
+    kind: 'cleaner',
+    cleanerId: req.user.id,
+  });
+  const agencyOffer = await RequestOffer.findOne({
+    requestId: doc._id,
+    kind: 'agency',
+  });
+  let isAgencySide = false;
+  if (doc.assignedAgencyId || agencyOffer) {
+    const agencyId = doc.assignedAgencyId?._id || doc.assignedAgencyId || agencyOffer?.agencyId;
+    if (agencyId) {
+      isAgencySide = await isAgencyMember(req.user.id, agencyId);
+    }
+  }
+  const staffAssignment = await JobAssignment.findOne({
+    requestId: doc._id,
+    staffUserId: req.user.id,
+  });
 
-  if (!isAdmin && !isClient && !isBizMember && !isAssigned && !isOffered) {
+  if (
+    !isAdmin &&
+    !isClient &&
+    !isBizMember &&
+    !isAssignedCleaner &&
+    !offer &&
+    !isAgencySide &&
+    !staffAssignment
+  ) {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  const plain = doc.toObject();
-  await attachPayToRequests(plain);
+  const plain = await hydrateRequest(doc, {
+    includeOffers: isAdmin,
+    includeEvents: isAdmin,
+  });
 
-  // Poster / business members see summary without full offer trail unless admin
   if ((isClient || isBizMember) && !isAdmin) {
-    return res.json({
-      ...plain,
-      offers: undefined,
-      notifiedCleanerCount: doc.notifiedCleanerCount,
-    });
+    plain.offers = undefined;
+    plain.notifiedCleanerCount = doc.notifiedCleanerCount;
+    plain.notifiedAgencyCount = doc.notifiedAgencyCount;
   }
   res.json(plain);
 });
@@ -209,15 +296,125 @@ router.post('/:id/respond', requireAuth, requireRole('cleaner'), async (req, res
   }
 });
 
-router.post('/:id/progress', requireAuth, requireRole('cleaner'), async (req, res) => {
+router.post('/:id/progress', requireAuth, requireRole('cleaner', 'cleaning_agency'), async (req, res) => {
   try {
     const { status } = req.body;
-    const request = await advanceBooking(req.params.id, req.user.id, status);
+    const request = await advanceBooking(req.params.id, req.user, status);
     res.json(request);
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
+
+router.post(
+  '/:id/agency-interest',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const { agencyId } = req.body;
+      if (!agencyId) return res.status(400).json({ error: 'agencyId required' });
+      const interest = await expressAgencyInterest(req.params.id, agencyId, req.user.id);
+      res.json(interest);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
+  '/:id/pick-agency',
+  requireAuth,
+  requireRole('client', 'business', 'admin'),
+  async (req, res) => {
+    try {
+      const { agencyId } = req.body;
+      if (!agencyId) return res.status(400).json({ error: 'agencyId required' });
+      const request = await pickAgencyForRequest(req.params.id, agencyId, req.user);
+      res.json(request);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
+  '/:id/agency-accept',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const { agencyId } = req.body;
+      if (!agencyId) return res.status(400).json({ error: 'agencyId required' });
+      const request = await agencyAcceptRequest(req.params.id, agencyId, req.user.id);
+      res.json(request);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
+  '/:id/assign-staff',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const { agencyId, staffUserId, payRatePerHour } = req.body;
+      if (!agencyId || !staffUserId || payRatePerHour == null) {
+        return res
+          .status(400)
+          .json({ error: 'agencyId, staffUserId, and payRatePerHour required' });
+      }
+      const request = await assignAgencyStaff(req.params.id, agencyId, req.user.id, {
+        staffUserId,
+        payRatePerHour,
+      });
+      res.json(request);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
+  '/:id/reassign-staff',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const { agencyId, fromStaffUserId, toStaffUserId, payRatePerHour } = req.body;
+      if (!agencyId || !fromStaffUserId || !toStaffUserId || payRatePerHour == null) {
+        return res.status(400).json({
+          error: 'agencyId, fromStaffUserId, toStaffUserId, and payRatePerHour required',
+        });
+      }
+      const request = await reassignAgencyStaff(req.params.id, agencyId, req.user.id, {
+        fromStaffUserId,
+        toStaffUserId,
+        payRatePerHour,
+      });
+      res.json(request);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
+  '/:id/staff-respond',
+  requireAuth,
+  requireRole('agency_staff'),
+  async (req, res) => {
+    try {
+      const { action } = req.body;
+      const assignment = await staffRespondToAssignment(req.params.id, req.user.id, action);
+      res.json(assignment);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
 
 router.patch('/:id', requireAuth, requireRole('client', 'business'), async (req, res) => {
   try {

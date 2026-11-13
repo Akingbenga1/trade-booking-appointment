@@ -10,6 +10,8 @@ const ROLE_HOME = {
   business: '/client',
   cleaner: '/cleaner',
   admin: '/admin',
+  cleaning_agency: '/agency',
+  agency_staff: '/cleaner',
 };
 
 export default function HomePage() {
@@ -80,13 +82,17 @@ export default function HomePage() {
         </form>
         <p className="muted">
           New business? <Link href="/register/business">Register your business</Link>
+          {' · '}
+          <Link href="/register/agency">Register a cleaning agency</Link>
         </p>
         <div className="demo">
           Demo: client@demo.com · cleaner1@demo.com · cleaner2@demo.com · admin@demo.com
           <br />
+          Agency: agency@demo.com · staff1@demo.com (after seed)
+          <br />
           Password: password123
           <br />
-          Businesses: use Register your business (not seeded)
+          Businesses: use Register your business (or seed)
         </div>
       </div>
     </div>

@@ -4,6 +4,15 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api, getStoredUser, setSession } from '../../../lib/api';
 
+const ROLE_HOME = {
+  client: '/client',
+  business: '/client',
+  cleaner: '/cleaner',
+  admin: '/admin',
+  cleaning_agency: '/agency',
+  agency_staff: '/cleaner',
+};
+
 export default function SetPasswordPage() {
   const router = useRouter();
   const [password, setPassword] = useState('');
@@ -17,12 +26,12 @@ export default function SetPasswordPage() {
       router.replace('/');
       return;
     }
-    if (user.role !== 'business') {
+    if (!['business', 'cleaning_agency'].includes(user.role)) {
       router.replace('/');
       return;
     }
     if (!user.mustSetPassword) {
-      router.replace('/client');
+      router.replace(ROLE_HOME[user.role] || '/');
     }
   }, [router]);
 
@@ -40,7 +49,7 @@ export default function SetPasswordPage() {
         body: { password },
       });
       setSession(data.token, data.user);
-      router.replace('/client');
+      router.replace(ROLE_HOME[data.user.role] || '/');
     } catch (err) {
       setError(err.message);
     } finally {
