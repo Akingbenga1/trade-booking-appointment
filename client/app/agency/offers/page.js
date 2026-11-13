@@ -62,7 +62,7 @@ function splitOffers(items, agencyId) {
   return { currentOffers, currentJobs, pastJobs };
 }
 
-function OfferCard({ item, mode, busy, onInterest, onLock, onProgress }) {
+function OfferCard({ item, mode, busy, onInterest, onLock, onProgress, onAssign }) {
   const { request, offer } = item;
   const requestId = request._id;
   const next = NEXT_STAGE[request.status];
@@ -112,23 +112,36 @@ function OfferCard({ item, mode, busy, onInterest, onLock, onProgress }) {
           )}
         </div>
       ) : null}
-      {mode === 'job' && next ? (
+      {mode === 'job' ? (
         <div className="row">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onProgress(requestId, next[0])}
-          >
-            {next[1]}
-          </button>
-          <Link href={`/agency/jobs/${requestId}`}>Swap staff</Link>
+          {(request.assignments || []).length === 0 ? (
+            <button type="button" onClick={() => onAssign(requestId)}>
+              Assign staff
+            </button>
+          ) : (
+            <>
+              {next ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onProgress(requestId, next[0])}
+                >
+                  {next[1]}
+                </button>
+              ) : null}
+              <button type="button" onClick={() => onAssign(requestId)}>
+                Assign staff
+              </button>
+              <Link href={`/agency/jobs/${requestId}`}>Swap staff</Link>
+            </>
+          )}
         </div>
       ) : null}
     </div>
   );
 }
 
-function Panel({ title, hint, items, mode, busy, onInterest, onLock, onProgress }) {
+function Panel({ title, hint, items, mode, busy, onInterest, onLock, onProgress, onAssign }) {
   return (
     <div className="card stack">
       <h2>{title}</h2>
@@ -144,6 +157,7 @@ function Panel({ title, hint, items, mode, busy, onInterest, onLock, onProgress 
             onInterest={onInterest}
             onLock={onLock}
             onProgress={onProgress}
+            onAssign={onAssign}
           />
         ))}
       </div>
@@ -181,8 +195,10 @@ export default function AllOffersPage() {
       await work();
       setMessage(success);
       await load();
+      return true;
     } catch (err) {
       setError(err.message);
+      return false;
     } finally {
       setBusy(false);
     }
@@ -199,15 +215,16 @@ export default function AllOffersPage() {
     );
   }
 
-  function lockJob(requestId) {
-    return runAction(
+  async function lockJob(requestId) {
+    const ok = await runAction(
       () =>
         api(`/api/requests/${requestId}/agency-accept`, {
           method: 'POST',
           body: { agencyId },
         }),
-      'Job locked to your agency.'
+      'Job locked. Assign staff next.'
     );
+    if (ok) router.push(`/agency/jobs/${requestId}/assign`);
   }
 
   function advance(requestId, status) {
@@ -273,6 +290,7 @@ export default function AllOffersPage() {
           mode="job"
           busy={busy}
           onProgress={advance}
+          onAssign={(requestId) => router.push(`/agency/jobs/${requestId}/assign`)}
         />
         <Panel
           title="Past jobs"

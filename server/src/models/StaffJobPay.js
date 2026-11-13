@@ -32,6 +32,7 @@ const staffJobPaySchema = new mongoose.Schema(
     payRatePerHour: { type: Number, required: true },
     minimumWagePerHour: { type: Number, required: true },
     durationHours: { type: Number, required: true },
+    totalAmount: { type: Number, required: true },
     currency: { type: String, default: 'GBP' },
   },
   { timestamps: true, collection: 'staff_job_pays' }

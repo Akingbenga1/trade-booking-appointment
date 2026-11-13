@@ -140,6 +140,25 @@ async function createOffersForRequest(requestId, nearbyCleaners, nearbyAgencies,
   if (docs.length) await RequestOffer.insertMany(docs);
 }
 
+function staffPayView(pay) {
+  if (!pay) return null;
+  const totalAmount =
+    pay.totalAmount != null
+      ? pay.totalAmount
+      : Math.round(Number(pay.payRatePerHour) * Number(pay.durationHours) * 100) / 100;
+  return {
+    payRatePerHour: pay.payRatePerHour,
+    minimumWagePerHour: pay.minimumWagePerHour,
+    durationHours: pay.durationHours,
+    currency: pay.currency || 'GBP',
+    totalAmount,
+  };
+}
+
+async function clearStaffPay(assignmentId) {
+  await StaffJobPay.deleteOne({ assignmentId });
+}
+
 async function notifyAgencyOwners(agencyIds, payload) {
   const userIds = [];
   for (const agencyId of agencyIds) {
@@ -171,7 +190,17 @@ export async function hydrateRequest(
   })
     .populate('staffUserId', 'name email')
     .lean();
-  plain.assignments = assignments;
+  const pays = await StaffJobPay.find({
+    assignmentId: { $in: assignments.map((row) => row._id) },
+  }).lean();
+  const payByAssignment = new Map(pays.map((row) => [String(row.assignmentId), row]));
+  let crewPayTotal = 0;
+  plain.assignments = assignments.map((row) => {
+    const pay = staffPayView(payByAssignment.get(String(row._id)));
+    if (pay) crewPayTotal += pay.totalAmount;
+    return { ...row, pay };
+  });
+  plain.crewPayTotal = Math.round(crewPayTotal * 100) / 100;
   if (plain.assignedAgencyId) {
     plain.assignedAgency =
       (await CleaningAgency.findById(plain.assignedAgencyId).select('name phone').lean()) || null;
@@ -681,6 +710,7 @@ export async function assignAgencyStaff(
     payRatePerHour: payFields.payRatePerHour,
     minimumWagePerHour: payFields.minimumWagePerHour,
     durationHours: payFields.durationHours,
+    totalAmount: payFields.totalAmount,
     currency: payFields.currency,
   });
 
@@ -699,6 +729,98 @@ export async function assignAgencyStaff(
     type: 'staff_assigned',
     title: 'Assigned to a job',
     body: 'Your agency assigned you to a cleaning job. Please confirm or decline.',
+    requestId,
+  });
+
+  return hydrateRequest(request);
+}
+
+/** Add one or more staff. Each person is paid their own rate times the job hours. */
+export async function assignAgencyStaffMany(requestId, agencyId, actorUserId, staff) {
+  if (!Array.isArray(staff) || staff.length < 1) {
+    const err = new Error('Add at least one staff member');
+    err.status = 400;
+    throw err;
+  }
+  const ids = staff.map((row) => String(row?.staffUserId || ''));
+  if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+    const err = new Error('Each staff member can be added once');
+    err.status = 400;
+    throw err;
+  }
+  for (const row of staff) {
+    if (row.payRatePerHour == null || row.payRatePerHour === '') {
+      const err = new Error('payRatePerHour required for each staff member');
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  let latest = null;
+  for (const row of staff) {
+    latest = await assignAgencyStaff(requestId, agencyId, actorUserId, {
+      staffUserId: row.staffUserId,
+      payRatePerHour: row.payRatePerHour,
+    });
+  }
+  return latest;
+}
+
+/** Take one staff member off the job and drop their pay. */
+export async function removeAgencyStaff(requestId, agencyId, actorUserId, staffUserId) {
+  if (!(await isAgencyOwnerOrAdmin(actorUserId, agencyId))) {
+    const err = new Error('Forbidden');
+    err.status = 403;
+    throw err;
+  }
+  const request = await CleaningRequest.findById(requestId);
+  if (!request) {
+    const err = new Error('Request not found');
+    err.status = 404;
+    throw err;
+  }
+  assertNotDeleted(request);
+  if (request.status === 'completed' || request.status === 'cancelled') {
+    const err = new Error('Cannot remove staff on a finished request');
+    err.status = 409;
+    throw err;
+  }
+  if (String(request.assignedAgencyId) !== String(agencyId)) {
+    const err = new Error('Agency is not assigned to this request');
+    err.status = 403;
+    throw err;
+  }
+
+  const prior = await JobAssignment.findOne({
+    requestId,
+    agencyId,
+    staffUserId,
+    confirmStatus: { $in: ['pending', 'confirmed'] },
+  });
+  if (!prior) {
+    const err = new Error('No active assignment for that staff member');
+    err.status = 404;
+    throw err;
+  }
+  prior.confirmStatus = 'removed';
+  prior.respondedAt = new Date();
+  await prior.save();
+  await clearStaffPay(prior._id);
+
+  request.assignedStaffIds = (request.assignedStaffIds || []).filter(
+    (id) => String(id) !== String(staffUserId)
+  );
+  await request.save();
+  await recordRequestEvent(
+    requestId,
+    request.status,
+    `agency:${agencyId}`,
+    `Removed staff ${staffUserId}`
+  );
+  await notify(staffUserId, {
+    type: 'staff_removed',
+    title: 'Removed from job',
+    body: 'Your agency removed you from this cleaning job.',
     requestId,
   });
 
@@ -747,6 +869,7 @@ export async function reassignAgencyStaff(
   prior.confirmStatus = 'reassigned';
   prior.respondedAt = new Date();
   await prior.save();
+  await clearStaffPay(prior._id);
 
   request.assignedStaffIds = (request.assignedStaffIds || []).filter(
     (id) => String(id) !== String(fromStaffUserId)
@@ -785,6 +908,7 @@ export async function staffRespondToAssignment(requestId, staffUserId, action) {
   assignment.confirmStatus = action === 'confirm' ? 'confirmed' : 'declined';
   assignment.respondedAt = new Date();
   await assignment.save();
+  if (action === 'decline') await clearStaffPay(assignment._id);
 
   const request = await CleaningRequest.findById(requestId);
   if (action === 'decline' && request) {

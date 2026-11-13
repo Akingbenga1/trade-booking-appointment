@@ -325,6 +325,7 @@ export default function AgencyPage() {
                 <div className="muted">No staff assigned yet</div>
               )}
               <div className="row">
+                <Link href={`/agency/jobs/${r._id}/assign`}>Assign staff</Link>
                 <Link href={`/agency/jobs/${r._id}`}>Swap staff</Link>
                 {NEXT_STEP[r.status] ? (
                   <button type="button" onClick={() => progress(r._id, NEXT_STEP[r.status])}>

@@ -20,6 +20,8 @@ import {
   pickAgencyForRequest,
   agencyAcceptRequest,
   assignAgencyStaff,
+  assignAgencyStaffMany,
+  removeAgencyStaff,
   staffRespondToAssignment,
   advanceBooking,
 } from '../src/services/requestService.js';
@@ -143,6 +145,8 @@ describe('cleaning agency booking', () => {
     const pay = await StaffJobPay.findOne({ requestId: req._id, staffUserId: staff._id });
     assert.ok(pay);
     assert.equal(pay.payRatePerHour, 14);
+    assert.equal(pay.durationHours, 16);
+    assert.equal(pay.totalAmount, 224);
 
     await staffRespondToAssignment(req._id, staff._id, 'confirm');
     const assignment = await JobAssignment.findOne({
@@ -163,5 +167,60 @@ describe('cleaning agency booking', () => {
         advanceBooking(req._id, { id: staff._id.toString(), role: 'agency_staff' }, 'on_site'),
       /Only the assigned agency/i
     );
+  });
+
+  it('assigns several staff, pays each for the job hours, and recalculates when one is removed', async () => {
+    const staffB = await makeUser({
+      name: 'Staff B',
+      email: 'ag-staff-b@test.com',
+      role: 'agency_staff',
+    });
+    await AgencyMembership.create({
+      agencyId: agency._id,
+      userId: staffB._id,
+      memberRole: 'staff',
+    });
+
+    const scheduleStart = new Date(Date.now() + 2 * 86400000);
+    scheduleStart.setHours(9, 0, 0, 0);
+    const scheduleEnd = new Date(scheduleStart);
+    scheduleEnd.setHours(13, 0, 0, 0);
+    const req = await createCleaningRequest({
+      clientId: client._id,
+      serviceDetails: 'Crew job',
+      scheduleStart,
+      scheduleEnd,
+      address: '2 Job St',
+      latitude: hub.lat,
+      longitude: hub.lng,
+    });
+    await expressAgencyInterest(req._id, agency._id, owner._id);
+    await pickAgencyForRequest(req._id, agency._id, {
+      id: client._id.toString(),
+      role: 'client',
+    });
+    await agencyAcceptRequest(req._id, agency._id, owner._id);
+
+    const assigned = await assignAgencyStaffMany(req._id, agency._id, owner._id, [
+      { staffUserId: staff._id, payRatePerHour: 13 },
+      { staffUserId: staffB._id, payRatePerHour: 15 },
+    ]);
+    assert.equal(assigned.assignments.length, 2);
+    const byName = Object.fromEntries(
+      assigned.assignments.map((row) => [row.staffUserId.name, row.pay.totalAmount])
+    );
+    assert.equal(byName.Staff, 52);
+    assert.equal(byName['Staff B'], 60);
+    assert.equal(assigned.crewPayTotal, 112);
+
+    const left = await removeAgencyStaff(req._id, agency._id, owner._id, staff._id);
+    assert.equal(left.assignments.length, 1);
+    assert.equal(left.assignments[0].pay.totalAmount, 60);
+    assert.equal(left.crewPayTotal, 60);
+    const removedPay = await StaffJobPay.findOne({
+      requestId: req._id,
+      staffUserId: staff._id,
+    });
+    assert.equal(removedPay, null);
   });
 });

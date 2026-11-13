@@ -25,7 +25,7 @@ const jobAssignmentSchema = new mongoose.Schema(
     },
     confirmStatus: {
       type: String,
-      enum: ['pending', 'confirmed', 'declined', 'reassigned'],
+      enum: ['pending', 'confirmed', 'declined', 'reassigned', 'removed'],
       default: 'pending',
       index: true,
     },
