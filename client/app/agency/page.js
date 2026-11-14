@@ -217,7 +217,10 @@ export default function AgencyPage() {
         </div>
 
         <div className="card stack">
-          <h2>Staff</h2>
+          <div className="row" style={{ justifyContent: 'space-between' }}>
+            <h2 style={{ margin: 0 }}>Staff</h2>
+            <Link href="/agency/staff/bulk">add many staff</Link>
+          </div>
           <form className="stack" onSubmit={createStaff}>
             <label>
               Name

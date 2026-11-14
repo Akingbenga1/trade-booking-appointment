@@ -5,6 +5,7 @@ import { AgencyJobInterest } from '../models/AgencyJobInterest.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
   createAgencyStaff,
+  createAgencyStaffMany,
   listAgenciesForUser,
   listAgencyStaff,
   isAgencyOwnerOrAdmin,
@@ -46,6 +47,24 @@ router.post(
   async (req, res) => {
     try {
       const result = await createAgencyStaff(req.user.id, req.params.agencyId, req.body);
+      res.status(201).json(result);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
+  '/:agencyId/staff/bulk',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const result = await createAgencyStaffMany(
+        req.user.id,
+        req.params.agencyId,
+        req.body?.staff
+      );
       res.status(201).json(result);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
