@@ -172,6 +172,58 @@ export async function createAgencyStaff(actorUserId, agencyId, { name, email, pa
   return { user: publicUser(user), linkedExisting: false };
 }
 
+const MAX_BULK_STAFF = 100;
+
+/**
+ * Create or link many staff accounts. One bad row does not stop the rest.
+ */
+export async function createAgencyStaffMany(actorUserId, agencyId, rows) {
+  if (!(await isAgencyOwnerOrAdmin(actorUserId, agencyId))) {
+    const err = new Error('Forbidden');
+    err.status = 403;
+    throw err;
+  }
+  if (!Array.isArray(rows) || rows.length === 0) {
+    const err = new Error('Add at least one staff member');
+    err.status = 400;
+    throw err;
+  }
+  if (rows.length > MAX_BULK_STAFF) {
+    const err = new Error(`You can add at most ${MAX_BULK_STAFF} staff at a time`);
+    err.status = 400;
+    throw err;
+  }
+
+  const results = [];
+  for (const row of rows) {
+    const name = row?.name;
+    const email = row?.email;
+    const password = row?.password;
+    try {
+      const created = await createAgencyStaff(actorUserId, agencyId, { name, email, password });
+      results.push({
+        name: created.user.name,
+        email: created.user.email,
+        status: created.linkedExisting ? 'linked' : 'created',
+      });
+    } catch (err) {
+      results.push({
+        name: String(name || '').trim(),
+        email: String(email || '').trim().toLowerCase(),
+        status: 'failed',
+        error: err.message,
+      });
+    }
+  }
+
+  return {
+    results,
+    created: results.filter((row) => row.status === 'created').length,
+    linked: results.filter((row) => row.status === 'linked').length,
+    failed: results.filter((row) => row.status === 'failed').length,
+  };
+}
+
 export async function getAgencyMemberUserIds(agencyId, roles = ['owner', 'admin']) {
   const rows = await AgencyMembership.find({
     agencyId,
