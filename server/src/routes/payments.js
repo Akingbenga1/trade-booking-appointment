@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import {
   confirmCheckoutPayment,
@@ -6,6 +7,17 @@ import {
   getPaymentForRequest,
   listBusinessTransactions,
 } from '../services/paymentService.js';
+import {
+  listReceiptJobsForBusiness,
+  readReceiptFile,
+  savePaymentReceipt,
+} from '../services/receiptService.js';
+import fs from 'fs';
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
 
 const router = Router();
 
@@ -72,5 +84,57 @@ router.post(
     }
   }
 );
+
+router.get(
+  '/receipts/jobs',
+  requireAuth,
+  requireRole('business'),
+  async (req, res) => {
+    try {
+      const rows = await listReceiptJobsForBusiness(req.user, req.query.businessId);
+      res.json(rows);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post('/receipts', requireAuth, requireRole('business'), (req, res) => {
+  upload.single('file')(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message || 'Could not read that file' });
+    try {
+      if (!req.file) return res.status(400).json({ error: 'Choose a PDF or image file' });
+      const receipt = await savePaymentReceipt(req.user, {
+        requestId: req.body.requestId,
+        agencyId: req.body.agencyId,
+        buffer: req.file.buffer,
+        originalName: req.file.originalname,
+        mimeType: req.file.mimetype,
+      });
+      res.status(201).json({
+        id: receipt._id,
+        originalName: receipt.originalName,
+        createdAt: receipt.createdAt,
+      });
+    } catch (error) {
+      res.status(error.status || 500).json({ error: error.message });
+    }
+  });
+});
+
+router.get('/receipts/:receiptId/file', requireAuth, async (req, res) => {
+  try {
+    const found = await readReceiptFile(req.user, req.params.receiptId);
+    res.setHeader('Content-Type', found.receipt.mimeType);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${found.downloadName}"`
+    );
+    fs.createReadStream(found.filePath).pipe(res);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
 
 export default router;

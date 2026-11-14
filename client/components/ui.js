@@ -203,6 +203,16 @@ export function TopBar({ title }) {
           </Link>
         ) : null}
         {user?.role === 'business' ? (
+          <Link href="/client/receipts" className="muted">
+            Upload receipt
+          </Link>
+        ) : null}
+        {user?.role === 'cleaning_agency' ? (
+          <Link href="/agency/receipts" className="muted">
+            Receipts
+          </Link>
+        ) : null}
+        {user?.role === 'business' ? (
           <Link href="/client/businesses/new" className="muted">
             Add another business
           </Link>

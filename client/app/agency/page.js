@@ -155,6 +155,8 @@ export default function AgencyPage() {
       <TopBar title="Cleaning agency" />
       <p className="muted">
         <Link href="/agency/payments">View payments</Link>
+        {' · '}
+        <Link href="/agency/receipts">Payment receipts</Link>
       </p>
       {error ? <div className="error">{error}</div> : null}
       {message ? <div className="success">{message}</div> : null}
