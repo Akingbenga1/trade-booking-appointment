@@ -97,7 +97,7 @@ export async function listBankDetailsForBusiness(user, businessId) {
     businessId: bid,
     status: { $ne: 'cancelled' },
     $or: [{ assignedAgencyId: { $ne: null } }, { selectedAgencyId: { $ne: null } }],
-  }).select('serviceDetails status assignedAgencyId selectedAgencyId');
+  }).select('serviceDetails status assignedAgencyId selectedAgencyId scheduleStart scheduleEnd');
 
   const byAgency = new Map();
   for (const job of jobs) {
@@ -108,6 +108,8 @@ export async function listBankDetailsForBusiness(user, businessId) {
       requestId: job._id,
       serviceDetails: job.serviceDetails,
       status: job.status,
+      scheduleStart: job.scheduleStart,
+      scheduleEnd: job.scheduleEnd,
     });
   }
   if (!byAgency.size) return [];

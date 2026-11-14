@@ -218,6 +218,11 @@ export function TopBar({ title }) {
             Upload receipt
           </Link>
         ) : null}
+        {user?.role === 'cleaner' ? (
+          <Link href="/cleaner/receipts" className="muted">
+            Receipts
+          </Link>
+        ) : null}
         {user?.role === 'cleaning_agency' ? (
           <Link href="/agency/bank" className="muted">
             Bank details

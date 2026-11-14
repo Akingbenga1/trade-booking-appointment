@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api, apiBlob } from '../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../components/ui';
-import { formatGbp } from '../../../lib/jobPay';
+import { formatGbp, jobStamp } from '../../../lib/jobPay';
 
 export default function AgencyReceiptsPage() {
   const router = useRouter();
@@ -19,6 +19,12 @@ export default function AgencyReceiptsPage() {
   const [openId, setOpenId] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewType, setPreviewType] = useState('');
+  const [confirmed, setConfirmed] = useState({});
+
+  function amountsDiffer(row) {
+    if (row.statedAmount == null || row.amount == null) return false;
+    return Math.abs(Number(row.statedAmount) - Number(row.amount)) > 0.009;
+  }
 
   useEffect(() => {
     if (user?.mustSetPassword) router.replace('/auth/set-password');
@@ -74,8 +80,14 @@ export default function AgencyReceiptsPage() {
     setMessage('');
     setBusyId(row.id);
     try {
+      if (amountsDiffer(row) && !confirmed[String(row.id)]) {
+        setError('The receipt amount and the job amount differ. Tick the box after you check the file.');
+        setBusyId('');
+        return;
+      }
       const result = await api(`/api/agencies/${agencyId}/receipts/${row.id}/mark-paid`, {
         method: 'POST',
+        body: { confirmMismatch: Boolean(confirmed[String(row.id)]) },
       });
       setMessage(
         result.alreadyPaid
@@ -129,9 +141,28 @@ export default function AgencyReceiptsPage() {
               </div>
               <div>{row.businessName} (business)</div>
               <div className="muted">{row.address}</div>
+              <div className="muted">{jobStamp(row)}</div>
               <div className="muted">
-                {row.amount == null ? 'No amount' : formatGbp(row.amount)} · {row.originalName}
+                Job {row.amount == null ? 'amount not set' : formatGbp(row.amount)}
+                {row.statedAmount != null ? ` · receipt says ${formatGbp(row.statedAmount)}` : ''}
+                {' · '}
+                {row.originalName}
               </div>
+              {amountsDiffer(row) && row.paymentStatus !== 'paid' ? (
+                <label className="row">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(confirmed[String(row.id)])}
+                    onChange={(event) =>
+                      setConfirmed((current) => ({
+                        ...current,
+                        [String(row.id)]: event.target.checked,
+                      }))
+                    }
+                  />
+                  I checked the file. The amounts differ.
+                </label>
+              ) : null}
               <div className="row">
                 <button type="button" disabled={busyId === String(row.id)} onClick={() => viewReceipt(row)}>
                   View receipt

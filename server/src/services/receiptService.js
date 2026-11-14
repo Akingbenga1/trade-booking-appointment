@@ -54,13 +54,41 @@ function safeDownloadName(name) {
     .slice(0, 120);
 }
 
-async function jobForBusinessUpload(user, requestId, agencyId) {
+function parseStatedAmount(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1000000) {
+    throw httpError('Enter the amount shown on the receipt', 400);
+  }
+  return Math.round(amount * 100) / 100;
+}
+
+function amountsDiffer(stated, jobAmount) {
+  if (stated == null || jobAmount == null) return false;
+  return Math.abs(Number(stated) - Number(jobAmount)) > 0.009;
+}
+
+function assertMismatchConfirmed(receipt, transaction, confirmMismatch) {
+  if (!amountsDiffer(receipt.statedAmount, transaction.amount)) return;
+  if (confirmMismatch) return;
+  throw httpError(
+    `The receipt says ${gbp(receipt.statedAmount)} and the job is ${gbp(transaction.amount)}. Confirm that you checked the file.`,
+    409
+  );
+}
+
+async function jobForBusinessUpload(user, requestId, { agencyId, cleanerUserId }) {
   const request = await CleaningRequest.findById(requestId);
   if (!request || request.deletedAt) throw httpError('Job not found', 404);
   if (!request.businessId) throw httpError('Only a business job can have a payment receipt', 400);
   if (!(await isBusinessMember(user.id, request.businessId))) throw httpError('Forbidden', 403);
-  if (String(request.assignedAgencyId || '') !== String(agencyId)) {
-    throw httpError('That agency is not assigned to this job', 400);
+  const forAgency =
+    request.assignedAgencyId && String(request.assignedAgencyId) === String(agencyId || '');
+  const forCleaner =
+    !request.assignedAgencyId &&
+    request.assignedCleanerId &&
+    String(request.assignedCleanerId) === String(cleanerUserId || '');
+  if (!forAgency && !forCleaner) {
+    throw httpError('That agency or cleaner is not assigned to this job', 400);
   }
   const ownership = await BusinessPayment.findOne({ requestId: request._id });
   const transaction = ownership
@@ -76,17 +104,21 @@ export async function listReceiptJobsForBusiness(user, businessId) {
 
   const requests = await CleaningRequest.find({
     businessId,
-    assignedAgencyId: { $ne: null },
     deletedAt: null,
+    $or: [{ assignedAgencyId: { $ne: null } }, { assignedCleanerId: { $ne: null } }],
   })
-    .select('serviceDetails address status assignedAgencyId updatedAt')
+    .select(
+      'serviceDetails address status assignedAgencyId assignedCleanerId scheduleStart scheduleEnd updatedAt'
+    )
     .sort({ updatedAt: -1 });
 
   const requestIds = requests.map((row) => row._id);
-  const [agencies, ownership, receipts] = await Promise.all([
+  const cleanerIds = requests.map((row) => row.assignedCleanerId).filter(Boolean);
+  const [agencies, cleaners, ownership, receipts] = await Promise.all([
     CleaningAgency.find({
-      _id: { $in: requests.map((row) => row.assignedAgencyId) },
+      _id: { $in: requests.map((row) => row.assignedAgencyId).filter(Boolean) },
     }).select('name'),
+    cleanerIds.length ? User.find({ _id: { $in: cleanerIds } }).select('name') : [],
     requestIds.length ? BusinessPayment.find({ requestId: { $in: requestIds } }) : [],
     requestIds.length ? PaymentReceipt.find({ requestId: { $in: requestIds } }) : [],
   ]);
@@ -94,6 +126,7 @@ export async function listReceiptJobsForBusiness(user, businessId) {
   const transactions = txIds.length ? await Transaction.find({ _id: { $in: txIds } }) : [];
 
   const agencyName = new Map(agencies.map((row) => [String(row._id), row.name]));
+  const cleanerName = new Map(cleaners.map((row) => [String(row._id), row.name]));
   const payByRequest = new Map(ownership.map((row) => [String(row.requestId), row]));
   const txById = new Map(transactions.map((row) => [String(row._id), row]));
   const receiptByRequest = new Map(receipts.map((row) => [String(row.requestId), row]));
@@ -102,13 +135,18 @@ export async function listReceiptJobsForBusiness(user, businessId) {
     const pay = payByRequest.get(String(request._id));
     const tx = pay ? txById.get(String(pay.transactionId)) : null;
     const receipt = receiptByRequest.get(String(request._id));
+    const hasAgency = Boolean(request.assignedAgencyId);
     return {
       requestId: request._id,
       serviceDetails: request.serviceDetails,
       address: request.address,
+      scheduleStart: request.scheduleStart,
+      scheduleEnd: request.scheduleEnd,
       requestStatus: request.status,
-      agencyId: request.assignedAgencyId,
-      agencyName: agencyName.get(String(request.assignedAgencyId)) || 'Agency',
+      agencyId: hasAgency ? request.assignedAgencyId : null,
+      agencyName: hasAgency ? agencyName.get(String(request.assignedAgencyId)) || 'Agency' : null,
+      cleanerId: hasAgency ? null : request.assignedCleanerId,
+      cleanerName: hasAgency ? null : cleanerName.get(String(request.assignedCleanerId)) || 'Cleaner',
       amount: tx?.amount ?? null,
       currency: tx?.currency || 'GBP',
       paymentStatus: tx?.status || 'none',
@@ -117,6 +155,7 @@ export async function listReceiptJobsForBusiness(user, businessId) {
             id: receipt._id,
             originalName: receipt.originalName,
             mimeType: receipt.mimeType,
+            statedAmount: receipt.statedAmount ?? null,
             createdAt: receipt.createdAt,
           }
         : null,
@@ -124,30 +163,39 @@ export async function listReceiptJobsForBusiness(user, businessId) {
   });
 }
 
-export async function savePaymentReceipt(user, { requestId, agencyId, buffer, originalName, mimeType }) {
+export async function savePaymentReceipt(
+  user,
+  { requestId, agencyId, cleanerUserId, statedAmount, buffer, originalName, mimeType }
+) {
   const ext = ALLOWED.get(mimeType);
   if (!ext) throw httpError('Upload a PDF or an image (JPG, PNG, or WebP)', 400);
   if (!looksLikeAllowedFile(mimeType, buffer)) {
     throw httpError('That file does not look like a PDF or an image', 400);
   }
   if (buffer.length > 5 * 1024 * 1024) throw httpError('The file must be 5 MB or smaller', 400);
+  const amountOnReceipt = parseStatedAmount(statedAmount);
 
-  const { request } = await jobForBusinessUpload(user, requestId, agencyId);
+  const { request } = await jobForBusinessUpload(user, requestId, { agencyId, cleanerUserId });
   await fs.mkdir(uploadDir, { recursive: true });
 
   const storedName = `${crypto.randomBytes(16).toString('hex')}${ext}`;
   await fs.writeFile(path.join(uploadDir, storedName), buffer);
+  const payee = request.assignedAgencyId
+    ? { agencyId: request.assignedAgencyId, cleanerUserId: null }
+    : { agencyId: null, cleanerUserId: request.assignedCleanerId };
 
   const prior = await PaymentReceipt.findOne({ requestId: request._id });
   if (prior) {
     await fs.unlink(path.join(uploadDir, prior.storedName)).catch(() => {});
-    prior.agencyId = request.assignedAgencyId;
+    prior.agencyId = payee.agencyId;
+    prior.cleanerUserId = payee.cleanerUserId;
     prior.businessId = request.businessId;
     prior.uploadedBy = user.id;
     prior.originalName = safeDownloadName(originalName);
     prior.storedName = storedName;
     prior.mimeType = mimeType;
     prior.size = buffer.length;
+    prior.statedAmount = amountOnReceipt;
     prior.markedPaidAt = undefined;
     prior.markedPaidBy = undefined;
     await prior.save();
@@ -158,7 +206,9 @@ export async function savePaymentReceipt(user, { requestId, agencyId, buffer, or
   const created = await PaymentReceipt.create({
     requestId: request._id,
     businessId: request.businessId,
-    agencyId: request.assignedAgencyId,
+    agencyId: payee.agencyId,
+    cleanerUserId: payee.cleanerUserId,
+    statedAmount: amountOnReceipt,
     uploadedBy: user.id,
     originalName: safeDownloadName(originalName),
     storedName,
@@ -174,8 +224,14 @@ async function receiptFileForUser(user, receiptId) {
   if (!receipt) throw httpError('Receipt not found', 404);
   const isBusiness = user.role === 'business' && (await isBusinessMember(user.id, receipt.businessId));
   const isAgency =
-    user.role === 'cleaning_agency' && (await isAgencyOwnerOrAdmin(user.id, receipt.agencyId));
-  if (!isBusiness && !isAgency) throw httpError('Forbidden', 403);
+    user.role === 'cleaning_agency' &&
+    receipt.agencyId &&
+    (await isAgencyOwnerOrAdmin(user.id, receipt.agencyId));
+  const isCleaner =
+    user.role === 'cleaner' &&
+    receipt.cleanerUserId &&
+    String(receipt.cleanerUserId) === String(user.id);
+  if (!isBusiness && !isAgency && !isCleaner) throw httpError('Forbidden', 403);
   return {
     receipt,
     filePath: path.join(uploadDir, receipt.storedName),
@@ -200,7 +256,9 @@ export async function listReceiptsForAgency(user, agencyId) {
   const receipts = await PaymentReceipt.find({ agencyId }).sort({ createdAt: -1 });
   const requestIds = receipts.map((row) => row.requestId);
   const [requests, businesses, ownership] = await Promise.all([
-    CleaningRequest.find({ _id: { $in: requestIds } }).select('serviceDetails address status'),
+    CleaningRequest.find({ _id: { $in: requestIds } }).select(
+      'serviceDetails address status scheduleStart scheduleEnd'
+    ),
     Business.find({ _id: { $in: receipts.map((row) => row.businessId) } }).select('name'),
     BusinessPayment.find({ requestId: { $in: requestIds } }),
   ]);
@@ -224,6 +282,9 @@ export async function listReceiptsForAgency(user, agencyId) {
       markedPaidAt: receipt.markedPaidAt || null,
       serviceDetails: request?.serviceDetails || 'Cleaning job',
       address: request?.address || '',
+      scheduleStart: request?.scheduleStart || null,
+      scheduleEnd: request?.scheduleEnd || null,
+      statedAmount: receipt.statedAmount ?? null,
       requestStatus: request?.status || null,
       businessName: businessName.get(String(receipt.businessId)) || 'Business',
       amount: tx?.amount ?? null,
@@ -233,7 +294,7 @@ export async function listReceiptsForAgency(user, agencyId) {
   });
 }
 
-export async function markJobPaidFromReceipt(user, agencyId, receiptId) {
+export async function markJobPaidFromReceipt(user, agencyId, receiptId, { confirmMismatch } = {}) {
   if (user.role !== 'cleaning_agency') throw httpError('Forbidden', 403);
   if (!(await isAgencyOwnerOrAdmin(user.id, agencyId))) throw httpError('Forbidden', 403);
 
@@ -249,6 +310,84 @@ export async function markJobPaidFromReceipt(user, agencyId, receiptId) {
   const transaction = ownership ? await Transaction.findById(ownership.transactionId) : null;
   if (!transaction) throw httpError('This job has no payment record', 400);
 
+  assertMismatchConfirmed(receipt, transaction, confirmMismatch);
+  const alreadyPaid = transaction.status === 'paid';
+  if (!alreadyPaid) {
+    await applyPaymentStatus({
+      transactionId: transaction._id,
+      status: 'paid',
+      provider: transaction.providerPaymentId ? transaction.provider : 'receipt',
+      paidAt: new Date(),
+    });
+  }
+  receipt.markedPaidAt = new Date();
+  receipt.markedPaidBy = user.id;
+  await receipt.save();
+  if (!alreadyPaid) await queueJobMarkedPaid(request, transaction);
+  return { alreadyPaid, paymentStatus: 'paid' };
+}
+
+export async function listReceiptsForCleaner(user) {
+  if (user.role !== 'cleaner') throw httpError('Forbidden', 403);
+  const receipts = await PaymentReceipt.find({ cleanerUserId: user.id }).sort({ createdAt: -1 });
+  const requests = await CleaningRequest.find({
+    _id: { $in: receipts.map((row) => row.requestId) },
+  }).select('serviceDetails address status scheduleStart scheduleEnd businessId');
+  const businesses = await Business.find({
+    _id: { $in: requests.map((row) => row.businessId).filter(Boolean) },
+  }).select('name');
+  const ownership = await BusinessPayment.find({
+    requestId: { $in: receipts.map((row) => row.requestId) },
+  });
+  const transactions = ownership.length
+    ? await Transaction.find({ _id: { $in: ownership.map((row) => row.transactionId).filter(Boolean) } })
+    : [];
+  const requestById = new Map(requests.map((row) => [String(row._id), row]));
+  const businessName = new Map(businesses.map((row) => [String(row._id), row.name]));
+  const payByRequest = new Map(ownership.map((row) => [String(row.requestId), row]));
+  const txById = new Map(transactions.map((row) => [String(row._id), row]));
+  return receipts.map((receipt) => {
+    const request = requestById.get(String(receipt.requestId));
+    const pay = payByRequest.get(String(receipt.requestId));
+    const tx = pay ? txById.get(String(pay.transactionId)) : null;
+    return {
+      id: receipt._id,
+      requestId: receipt.requestId,
+      originalName: receipt.originalName,
+      mimeType: receipt.mimeType,
+      createdAt: receipt.createdAt,
+      statedAmount: receipt.statedAmount ?? null,
+      serviceDetails: request?.serviceDetails || 'Cleaning job',
+      address: request?.address || '',
+      scheduleStart: request?.scheduleStart || null,
+      scheduleEnd: request?.scheduleEnd || null,
+      businessName: request ? businessName.get(String(request.businessId)) || 'Business' : 'Business',
+      amount: tx?.amount ?? null,
+      currency: tx?.currency || 'GBP',
+      paymentStatus: tx?.status || 'none',
+    };
+  });
+}
+
+export async function markJobPaidByCleaner(user, receiptId, { confirmMismatch } = {}) {
+  if (user.role !== 'cleaner') throw httpError('Forbidden', 403);
+  const receipt = await PaymentReceipt.findById(receiptId);
+  if (!receipt || String(receipt.cleanerUserId || '') !== String(user.id)) {
+    throw httpError('Receipt not found', 404);
+  }
+  const request = await CleaningRequest.findById(receipt.requestId);
+  if (
+    !request ||
+    request.deletedAt ||
+    request.assignedAgencyId ||
+    String(request.assignedCleanerId || '') !== String(user.id)
+  ) {
+    throw httpError('This job is no longer assigned to you', 409);
+  }
+  const ownership = await BusinessPayment.findOne({ requestId: request._id });
+  const transaction = ownership ? await Transaction.findById(ownership.transactionId) : null;
+  if (!transaction) throw httpError('This job has no payment record', 400);
+  assertMismatchConfirmed(receipt, transaction, confirmMismatch);
   const alreadyPaid = transaction.status === 'paid';
   if (!alreadyPaid) {
     await applyPaymentStatus({
@@ -275,7 +414,22 @@ async function peopleForMemberships(memberships) {
   return User.find({ _id: { $in: ids } }).select('name email');
 }
 
+function jobTitle(request) {
+  const when = request.scheduleStart
+    ? new Date(request.scheduleStart).toLocaleString('en-GB', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+        timeZone: 'Europe/London',
+      })
+    : '';
+  return when ? `${request.serviceDetails} (${when})` : request.serviceDetails;
+}
+
 async function queueReceiptUploaded(request, receipt) {
+  if (!request.assignedAgencyId) {
+    await queueCleanerReceipt(request, receipt);
+    return;
+  }
   try {
     const [business, memberships, pay] = await Promise.all([
       Business.findById(request.businessId).select('name'),
@@ -289,7 +443,8 @@ async function queueReceiptUploaded(request, receipt) {
     const people = await peopleForMemberships(memberships);
     const businessName = business?.name || 'A business';
     const amount = transaction ? gbp(transaction.amount) : 'the agreed amount';
-    const body = `${businessName} uploaded a payment receipt for ${request.serviceDetails} (${amount}). Open Payment receipts to check the file and mark the job paid.`;
+    const stated = receipt.statedAmount != null ? gbp(receipt.statedAmount) : 'not entered';
+    const body = `${businessName} uploaded a payment receipt for ${jobTitle(request)}. The file says ${stated}. The job amount is ${amount}. Open Payment receipts to check the file and mark the job paid.`;
     for (const person of people) {
       try {
         await notify(person._id, {
@@ -304,8 +459,10 @@ async function queueReceiptUploaded(request, receipt) {
           '',
           body,
           '',
-          `Job: ${request.serviceDetails}`,
+          `Job: ${jobTitle(request)}`,
           `Address: ${request.address}`,
+          `Amount on the receipt: ${stated}`,
+          `Job amount: ${amount}`,
           `File: ${receipt.originalName}`,
           '',
           `Open receipts: ${config.clientOrigin}/agency/receipts`,
@@ -330,16 +487,62 @@ async function queueReceiptUploaded(request, receipt) {
   }
 }
 
+async function queueCleanerReceipt(request, receipt) {
+  try {
+    const [cleaner, business] = await Promise.all([
+      User.findById(request.assignedCleanerId).select('name email'),
+      Business.findById(request.businessId).select('name'),
+    ]);
+    if (!cleaner) return;
+    const businessName = business?.name || 'A business';
+    const stated = receipt.statedAmount != null ? gbp(receipt.statedAmount) : 'not entered';
+    const body = `${businessName} uploaded a payment receipt for ${jobTitle(request)}. The file says ${stated}. Open Payment receipts to check it and mark the job paid.`;
+    await notify(cleaner._id, {
+      type: 'payment_receipt',
+      title: 'Payment receipt uploaded',
+      body,
+      requestId: request._id,
+    });
+    if (!cleaner.email) return;
+    const text = [
+      `Hi ${cleaner.name},`,
+      '',
+      body,
+      '',
+      `Job: ${jobTitle(request)}`,
+      `Address: ${request.address}`,
+      `File: ${receipt.originalName}`,
+      '',
+      `Open receipts: ${config.clientOrigin}/cleaner/receipts`,
+    ].join('\n');
+    enqueueEmail({
+      to: cleaner.email,
+      subject: `${businessName} uploaded a payment receipt`,
+      text,
+      html: htmlFromPlainText(text),
+      meta: {
+        kind: 'payment_receipt',
+        userId: String(cleaner._id),
+        requestId: String(request._id),
+      },
+    });
+  } catch (err) {
+    console.error('[email] cleaner receipt notice failed', err.message);
+  }
+}
+
 async function queueJobMarkedPaid(request, transaction) {
   try {
-    const [agency, memberships] = await Promise.all([
-      CleaningAgency.findById(request.assignedAgencyId).select('name'),
+    const [payer, memberships] = await Promise.all([
+      request.assignedAgencyId
+        ? CleaningAgency.findById(request.assignedAgencyId).select('name')
+        : User.findById(request.assignedCleanerId).select('name'),
       BusinessMembership.find({ businessId: request.businessId }).select('userId'),
     ]);
     const people = await peopleForMemberships(memberships);
-    const agencyName = agency?.name || 'The agency';
+    const payerName = payer?.name || (request.assignedAgencyId ? 'The agency' : 'The cleaner');
     const amount = gbp(transaction.amount);
-    const body = `${agencyName} marked ${request.serviceDetails} as paid (${amount}) from your receipt.`;
+    const body = `${payerName} marked ${jobTitle(request)} as paid (${amount}) from your receipt.`;
     for (const person of people) {
       try {
         await notify(person._id, {
@@ -354,7 +557,7 @@ async function queueJobMarkedPaid(request, transaction) {
           '',
           body,
           '',
-          `Job: ${request.serviceDetails}`,
+          `Job: ${jobTitle(request)}`,
           `Address: ${request.address}`,
           `Amount: ${amount}`,
           '',
@@ -362,7 +565,7 @@ async function queueJobMarkedPaid(request, transaction) {
         ].join('\n');
         enqueueEmail({
           to: person.email,
-          subject: `${agencyName} marked your job paid`,
+          subject: `${payerName} marked your job paid`,
           text,
           html: htmlFromPlainText(text),
           meta: {

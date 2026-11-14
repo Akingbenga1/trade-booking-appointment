@@ -22,9 +22,14 @@ const paymentReceiptSchema = new mongoose.Schema(
     agencyId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'CleaningAgency',
-      required: true,
       index: true,
     },
+    cleanerUserId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
+    },
+    statedAmount: { type: Number },
     uploadedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     originalName: { type: String, required: true },
     storedName: { type: String, required: true },
@@ -35,5 +40,13 @@ const paymentReceiptSchema = new mongoose.Schema(
   },
   { timestamps: true, collection: 'payment_receipts' }
 );
+
+paymentReceiptSchema.pre('validate', function rejectEmptyPayee(next) {
+  if (!this.agencyId && !this.cleanerUserId) {
+    next(new Error('A receipt needs an agency or a cleaner'));
+    return;
+  }
+  next();
+});
 
 export const PaymentReceipt = mongoose.model('PaymentReceipt', paymentReceiptSchema);

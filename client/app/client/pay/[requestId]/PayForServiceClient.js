@@ -140,9 +140,20 @@ export default function PayForServicePage() {
             )}
             <div className="item stack">
               <strong>Bank transfer</strong>
-              {!data.agency ? (
+              {!data.agency && data.cleaner ? (
+                <div className="stack">
+                  <p className="muted">
+                    This job is with {data.cleaner.name}. Bank details are for an agency, so there
+                    is no agency account here. After you pay the cleaner, upload the receipt.
+                  </p>
+                  <Link href={`/client/receipts?cleanerId=${encodeURIComponent(data.cleaner.id)}`}>
+                    Upload payment receipt
+                  </Link>
+                </div>
+              ) : !data.agency ? (
                 <p className="muted">
-                  Choose an agency for this job first. Their official bank details will show here.
+                  Nobody is assigned yet. Bank details appear here after an agency is chosen. You
+                  can upload a receipt once an agency or a cleaner is assigned.
                 </p>
               ) : data.agency.bank?.provided ? (
                 <div className="stack">

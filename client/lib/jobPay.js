@@ -40,6 +40,17 @@ export function formatGbp(amount) {
   })}`;
 }
 
+export function jobStamp(job) {
+  const id = String(job?.requestId || job?._id || '');
+  const ref = id ? `ref ${id.slice(-4)}` : '';
+  if (!job?.scheduleStart) return ref;
+  const when = new Date(job.scheduleStart).toLocaleString('en-GB', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  return ref ? `${when} · ${ref}` : when;
+}
+
 export function formatPaySummary(pay) {
   if (!pay) return null;
   return `${formatGbp(pay.payRatePerHour)}/hr · ${pay.durationHours}h · total ${formatGbp(pay.totalAmount)}`;

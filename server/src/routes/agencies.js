@@ -138,7 +138,8 @@ router.post(
       const result = await markJobPaidFromReceipt(
         req.user,
         req.params.agencyId,
-        req.params.receiptId
+        req.params.receiptId,
+        { confirmMismatch: Boolean(req.body?.confirmMismatch) }
       );
       res.json(result);
     } catch (err) {

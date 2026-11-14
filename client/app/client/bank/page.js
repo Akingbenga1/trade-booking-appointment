@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '../../../lib/api';
 import { TopBar, useRequireRole } from '../../../components/ui';
+import { jobStamp } from '../../../lib/jobPay';
 
 export default function BusinessBankPage() {
   const router = useRouter();
@@ -84,7 +85,8 @@ export default function BusinessBankPage() {
                 <p className="muted">This agency has not added bank details yet.</p>
               )}
               <div className="muted">
-                Jobs: {row.jobs.map((job) => job.serviceDetails).join(', ')}
+                Jobs:{' '}
+                {row.jobs.map((job) => `${job.serviceDetails} (${jobStamp(job)})`).join('; ')}
               </div>
               <Link href={`/client/receipts?agencyId=${encodeURIComponent(row.agencyId)}`}>
                 Upload payment receipt

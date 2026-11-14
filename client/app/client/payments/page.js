@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { api } from '../../../lib/api';
+import { api, apiBlob } from '../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../components/ui';
-import { formatGbp } from '../../../lib/jobPay';
+import { formatGbp, jobStamp } from '../../../lib/jobPay';
 
 export default function PaymentTransactionsPage() {
   const router = useRouter();
@@ -15,6 +15,21 @@ export default function PaymentTransactionsPage() {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [openingId, setOpeningId] = useState('');
+
+  async function viewReceipt(receiptId) {
+    setError('');
+    setOpeningId(String(receiptId));
+    try {
+      const blob = await apiBlob(`/api/payments/receipts/${receiptId}/file`);
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setOpeningId('');
+    }
+  }
 
   useEffect(() => {
     if (user?.mustSetPassword) {
@@ -126,6 +141,7 @@ export default function PaymentTransactionsPage() {
                     </td>
                     <td>
                       <Link href={`/client/pay/${row.requestId}`}>{row.jobLabel}</Link>
+                      <div className="muted">{jobStamp(row)}</div>
                     </td>
                     <td>
                       <StatusBadge status={row.status} />
@@ -134,7 +150,15 @@ export default function PaymentTransactionsPage() {
                       {row.providerId || '—'}
                     </td>
                     <td>
-                      {row.receiptUrl ? (
+                      {row.receiptId ? (
+                        <button
+                          type="button"
+                          disabled={openingId === String(row.receiptId)}
+                          onClick={() => viewReceipt(row.receiptId)}
+                        >
+                          View receipt
+                        </button>
+                      ) : row.receiptUrl ? (
                         <a href={row.receiptUrl} target="_blank" rel="noreferrer">
                           Download receipt
                         </a>
