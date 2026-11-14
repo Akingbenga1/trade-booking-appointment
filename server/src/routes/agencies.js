@@ -13,6 +13,7 @@ import {
 import { hydrateRequest, notDeletedFilter } from '../services/requestService.js';
 import { attachPayToRequests } from '../services/jobPay.js';
 import { listAgencyPayments } from '../services/paymentService.js';
+import { listReceiptsForAgency, markJobPaidFromReceipt } from '../services/receiptService.js';
 
 const router = Router();
 
@@ -81,6 +82,38 @@ router.get(
     try {
       const rows = await listAgencyPayments(req.user, req.params.agencyId);
       res.json(rows);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.get(
+  '/:agencyId/receipts',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const rows = await listReceiptsForAgency(req.user, req.params.agencyId);
+      res.json(rows);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.post(
+  '/:agencyId/receipts/:receiptId/mark-paid',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const result = await markJobPaidFromReceipt(
+        req.user,
+        req.params.agencyId,
+        req.params.receiptId
+      );
+      res.json(result);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
     }

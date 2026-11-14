@@ -117,6 +117,8 @@ export default function AgencyPaymentsPage() {
       <TopBar title="Payments" />
       <p className="muted">
         <Link href="/agency">Back to agency home</Link>
+        {' · '}
+        <Link href="/agency/receipts">Payment receipts</Link>
       </p>
       {error ? <div className="error">{error}</div> : null}
       {agencies.length > 1 ? (

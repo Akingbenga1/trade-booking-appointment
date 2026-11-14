@@ -28,7 +28,13 @@ export function useRequireRole(role) {
   return user;
 }
 
-const NOTIFY_ROLES = new Set(['client', 'business', 'cleaner', 'agency_staff']);
+const NOTIFY_ROLES = new Set([
+  'client',
+  'business',
+  'cleaner',
+  'agency_staff',
+  'cleaning_agency',
+]);
 /** Polling is a safety net; live alerts arrive over WebSocket. */
 const POLL_MS_CONNECTED = 60_000;
 const POLL_MS_DISCONNECTED = 15_000;
@@ -200,6 +206,16 @@ export function TopBar({ title }) {
         {user?.role === 'business' ? (
           <Link href="/client/payments" className="muted">
             Payments
+          </Link>
+        ) : null}
+        {user?.role === 'business' ? (
+          <Link href="/client/receipts" className="muted">
+            Upload receipt
+          </Link>
+        ) : null}
+        {user?.role === 'cleaning_agency' ? (
+          <Link href="/agency/receipts" className="muted">
+            Receipts
           </Link>
         ) : null}
         {user?.role === 'business' ? (
