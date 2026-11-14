@@ -5,6 +5,9 @@ import { Transaction } from '../models/Transaction.js';
 import { PaymentProviderEvent } from '../models/PaymentProviderEvent.js';
 import { config } from '../config.js';
 import { isBusinessMember } from './businessService.js';
+import { isAgencyOwnerOrAdmin } from './agencyService.js';
+import { Business } from '../models/Business.js';
+import { User } from '../models/User.js';
 import { payToPublic } from './jobPay.js';
 import { applyPaymentStatus } from './payments/core.js';
 import { mapStripeEvent } from './payments/stripeAdapter.js';
@@ -245,6 +248,70 @@ export async function listBusinessTransactions(user, businessId) {
       requestStatus: request?.status || null,
       status: tx?.status || 'unpaid',
       providerId: tx?.providerPaymentId || tx?.providerCheckoutSessionId || null,
+      receiptUrl: tx?.receiptUrl || null,
+    };
+  });
+}
+
+/**
+ * Payments for jobs locked to one agency. Business jobs use the payment record.
+ * Personal jobs have no charge, so the row says who posted them and that nothing is due.
+ */
+export async function listAgencyPayments(user, agencyId) {
+  if (user.role !== 'cleaning_agency') {
+    const err = new Error('Forbidden');
+    err.status = 403;
+    throw err;
+  }
+  if (!(await isAgencyOwnerOrAdmin(user.id, agencyId))) {
+    const err = new Error('Forbidden');
+    err.status = 403;
+    throw err;
+  }
+
+  const requests = await CleaningRequest.find({
+    assignedAgencyId: agencyId,
+    deletedAt: null,
+  })
+    .select('serviceDetails address status clientId businessId updatedAt')
+    .sort({ updatedAt: -1 });
+
+  const requestIds = requests.map((row) => row._id);
+  const ownership = requestIds.length
+    ? await BusinessPayment.find({ requestId: { $in: requestIds } })
+    : [];
+  const txIds = ownership.map((row) => row.transactionId).filter(Boolean);
+  const transactions = txIds.length ? await Transaction.find({ _id: { $in: txIds } }) : [];
+  const businesses = await Business.find({
+    _id: { $in: requests.map((row) => row.businessId).filter(Boolean) },
+  }).select('name');
+  const clients = await User.find({
+    _id: { $in: requests.map((row) => row.clientId).filter(Boolean) },
+  }).select('name');
+
+  const payByRequest = new Map(ownership.map((row) => [String(row.requestId), row]));
+  const txById = new Map(transactions.map((row) => [String(row._id), row]));
+  const businessName = new Map(businesses.map((row) => [String(row._id), row.name]));
+  const clientName = new Map(clients.map((row) => [String(row._id), row.name]));
+
+  return requests.map((request) => {
+    const pay = payByRequest.get(String(request._id));
+    const tx = pay ? txById.get(String(pay.transactionId)) : null;
+    const isBusiness = Boolean(request.businessId);
+    return {
+      id: String(tx?._id || request._id),
+      requestId: request._id,
+      date: tx?.paidAt || tx?.updatedAt || request.updatedAt,
+      amount: tx ? tx.amount : null,
+      currency: tx?.currency || 'GBP',
+      jobLabel: request.serviceDetails,
+      address: request.address,
+      requestStatus: request.status,
+      status: tx?.status || 'none',
+      payerName: isBusiness
+        ? businessName.get(String(request.businessId)) || 'Business'
+        : clientName.get(String(request.clientId)) || 'Client',
+      payerKind: isBusiness ? 'business' : 'client',
       receiptUrl: tx?.receiptUrl || null,
     };
   });
