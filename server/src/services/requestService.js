@@ -34,6 +34,7 @@ import {
   roundHours,
 } from './jobHours.js';
 import { listRequestEvents, recordRequestEvent } from './requestEvents.js';
+import { enqueueEmail, htmlFromPlainText } from './emailQueue.js';
 
 /** Mongo filter: exclude soft-deleted requests. */
 export const notDeletedFilter = { deletedAt: null };
@@ -792,8 +793,58 @@ export async function assignAgencyStaff(
     body: 'Your agency assigned you to a cleaning job. Please confirm or decline.',
     requestId,
   });
+  await queueStaffAssignmentEmail(request, agencyId, staffUserId, payFields);
 
   return hydrateRequest(request);
+}
+
+function gbp(amount) {
+  return `£${Number(amount).toFixed(2)}`;
+}
+
+function formatJobWindow(start, end) {
+  if (!start || !end) return 'Not set';
+  const options = { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/London' };
+  const from = new Date(start).toLocaleString('en-GB', options);
+  const to = new Date(end).toLocaleString('en-GB', options);
+  return `${from} to ${to}`;
+}
+
+async function queueStaffAssignmentEmail(request, agencyId, staffUserId, payFields) {
+  try {
+    const [staffUser, agency] = await Promise.all([
+      User.findById(staffUserId).select('name email'),
+      CleaningAgency.findById(agencyId).select('name'),
+    ]);
+    if (!staffUser?.email) return;
+    const agencyName = agency?.name || 'Your agency';
+    const text = [
+      `Hi ${staffUser.name},`,
+      '',
+      `${agencyName} assigned you to a cleaning job. Confirm or decline it in the app.`,
+      '',
+      `Job: ${request.serviceDetails}`,
+      `Address: ${request.address}`,
+      `When: ${formatJobWindow(request.scheduleStart, request.scheduleEnd)}`,
+      `Your hours: ${payFields.durationHours}`,
+      `Your pay: ${gbp(payFields.payRatePerHour)} per hour, ${gbp(payFields.totalAmount)} in total`,
+      '',
+      `Sign in: ${config.clientOrigin}`,
+    ].join('\n');
+    enqueueEmail({
+      to: staffUser.email,
+      subject: `${agencyName} assigned you to a job`,
+      text,
+      html: htmlFromPlainText(text),
+      meta: {
+        kind: 'staff_assigned',
+        userId: String(staffUser._id),
+        requestId: String(request._id),
+      },
+    });
+  } catch (err) {
+    console.error('[email] staff assignment failed', err.message);
+  }
 }
 
 /** Add one or more staff. Each person is paid their own rate times the job hours. */

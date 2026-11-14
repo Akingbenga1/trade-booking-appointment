@@ -4,7 +4,7 @@ import { AgencyMembership } from '../models/AgencyMembership.js';
 import { User } from '../models/User.js';
 import { config } from '../config.js';
 import { parsePlaceFields } from './place.js';
-import { enqueueEmail } from './emailQueue.js';
+import { enqueueEmail, htmlFromPlainText } from './emailQueue.js';
 import { createMagicToken, publicUser } from './businessService.js';
 
 export async function isAgencyMember(userId, agencyId, roles = null) {
@@ -169,7 +169,37 @@ export async function createAgencyStaff(actorUserId, agencyId, { name, email, pa
     mustSetPassword: false,
   });
   await addAgencyMembership(agencyId, user._id, 'staff');
+  await queueStaffWelcome(user, agencyId);
   return { user: publicUser(user), linkedExisting: false };
+}
+
+async function queueStaffWelcome(user, agencyId) {
+  try {
+    const agency = await CleaningAgency.findById(agencyId).select('name');
+    const agencyName = agency?.name || 'Your agency';
+    const text = [
+      `Hi ${user.name},`,
+      '',
+      `${agencyName} created your staff profile.`,
+      '',
+      `Name: ${user.name}`,
+      `Sign-in email: ${user.email}`,
+      `Agency: ${agencyName}`,
+      '',
+      'Ask your agency for your sign-in password. It is not included in this email.',
+      '',
+      `Sign in: ${config.clientOrigin}`,
+    ].join('\n');
+    enqueueEmail({
+      to: user.email,
+      subject: `${agencyName} created your staff profile`,
+      text,
+      html: htmlFromPlainText(text),
+      meta: { kind: 'staff_welcome', userId: String(user._id), agencyId: String(agencyId) },
+    });
+  } catch (err) {
+    console.error('[email] staff welcome failed', err.message);
+  }
 }
 
 const MAX_BULK_STAFF = 100;
