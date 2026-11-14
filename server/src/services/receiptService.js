@@ -11,6 +11,12 @@ import { CleaningAgency } from '../models/CleaningAgency.js';
 import { isBusinessMember } from './businessService.js';
 import { isAgencyOwnerOrAdmin } from './agencyService.js';
 import { applyPaymentStatus } from './payments/core.js';
+import { notify } from './notify.js';
+import { enqueueEmail, htmlFromPlainText } from './emailQueue.js';
+import { AgencyMembership } from '../models/AgencyMembership.js';
+import { BusinessMembership } from '../models/BusinessMembership.js';
+import { User } from '../models/User.js';
+import { config } from '../config.js';
 
 const ALLOWED = new Map([
   ['application/pdf', '.pdf'],
@@ -145,10 +151,11 @@ export async function savePaymentReceipt(user, { requestId, agencyId, buffer, or
     prior.markedPaidAt = undefined;
     prior.markedPaidBy = undefined;
     await prior.save();
+    await queueReceiptUploaded(request, prior);
     return prior;
   }
 
-  return PaymentReceipt.create({
+  const created = await PaymentReceipt.create({
     requestId: request._id,
     businessId: request.businessId,
     agencyId: request.assignedAgencyId,
@@ -158,6 +165,8 @@ export async function savePaymentReceipt(user, { requestId, agencyId, buffer, or
     mimeType,
     size: buffer.length,
   });
+  await queueReceiptUploaded(request, created);
+  return created;
 }
 
 async function receiptFileForUser(user, receiptId) {
@@ -252,5 +261,121 @@ export async function markJobPaidFromReceipt(user, agencyId, receiptId) {
   receipt.markedPaidAt = new Date();
   receipt.markedPaidBy = user.id;
   await receipt.save();
+  if (!alreadyPaid) await queueJobMarkedPaid(request, transaction);
   return { alreadyPaid, paymentStatus: 'paid' };
+}
+
+function gbp(amount) {
+  return `£${Number(amount).toFixed(2)}`;
+}
+
+async function peopleForMemberships(memberships) {
+  const ids = memberships.map((row) => row.userId);
+  if (!ids.length) return [];
+  return User.find({ _id: { $in: ids } }).select('name email');
+}
+
+async function queueReceiptUploaded(request, receipt) {
+  try {
+    const [business, memberships, pay] = await Promise.all([
+      Business.findById(request.businessId).select('name'),
+      AgencyMembership.find({
+        agencyId: request.assignedAgencyId,
+        memberRole: { $in: ['owner', 'admin'] },
+      }).select('userId'),
+      BusinessPayment.findOne({ requestId: request._id }).select('transactionId'),
+    ]);
+    const transaction = pay ? await Transaction.findById(pay.transactionId).select('amount') : null;
+    const people = await peopleForMemberships(memberships);
+    const businessName = business?.name || 'A business';
+    const amount = transaction ? gbp(transaction.amount) : 'the agreed amount';
+    const body = `${businessName} uploaded a payment receipt for ${request.serviceDetails} (${amount}). Open Payment receipts to check the file and mark the job paid.`;
+    for (const person of people) {
+      try {
+        await notify(person._id, {
+          type: 'payment_receipt',
+          title: 'Payment receipt uploaded',
+          body,
+          requestId: request._id,
+        });
+        if (!person.email) continue;
+        const text = [
+          `Hi ${person.name},`,
+          '',
+          body,
+          '',
+          `Job: ${request.serviceDetails}`,
+          `Address: ${request.address}`,
+          `File: ${receipt.originalName}`,
+          '',
+          `Open receipts: ${config.clientOrigin}/agency/receipts`,
+        ].join('\n');
+        enqueueEmail({
+          to: person.email,
+          subject: `${businessName} uploaded a payment receipt`,
+          text,
+          html: htmlFromPlainText(text),
+          meta: {
+            kind: 'payment_receipt',
+            userId: String(person._id),
+            requestId: String(request._id),
+          },
+        });
+      } catch (err) {
+        console.error('[email] payment receipt notice failed', err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[email] payment receipt notice failed', err.message);
+  }
+}
+
+async function queueJobMarkedPaid(request, transaction) {
+  try {
+    const [agency, memberships] = await Promise.all([
+      CleaningAgency.findById(request.assignedAgencyId).select('name'),
+      BusinessMembership.find({ businessId: request.businessId }).select('userId'),
+    ]);
+    const people = await peopleForMemberships(memberships);
+    const agencyName = agency?.name || 'The agency';
+    const amount = gbp(transaction.amount);
+    const body = `${agencyName} marked ${request.serviceDetails} as paid (${amount}) from your receipt.`;
+    for (const person of people) {
+      try {
+        await notify(person._id, {
+          type: 'payment_marked_paid',
+          title: 'Job marked paid',
+          body,
+          requestId: request._id,
+        });
+        if (!person.email) continue;
+        const text = [
+          `Hi ${person.name},`,
+          '',
+          body,
+          '',
+          `Job: ${request.serviceDetails}`,
+          `Address: ${request.address}`,
+          `Amount: ${amount}`,
+          '',
+          `Open payments: ${config.clientOrigin}/client/payments`,
+        ].join('\n');
+        enqueueEmail({
+          to: person.email,
+          subject: `${agencyName} marked your job paid`,
+          text,
+          html: htmlFromPlainText(text),
+          meta: {
+            kind: 'payment_marked_paid',
+            userId: String(person._id),
+            requestId: String(request._id),
+          },
+        });
+      } catch (err) {
+        console.error('[email] payment marked paid notice failed', err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[email] payment marked paid notice failed', err.message);
+  }
 }

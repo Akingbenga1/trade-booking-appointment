@@ -12,6 +12,7 @@ import { CleaningRequest } from '../src/models/CleaningRequest.js';
 import { BusinessPayment } from '../src/models/BusinessPayment.js';
 import { Transaction } from '../src/models/Transaction.js';
 import { PaymentReceipt } from '../src/models/PaymentReceipt.js';
+import { Notification } from '../src/models/Notification.js';
 import {
   listReceiptJobsForBusiness,
   listReceiptsForAgency,
@@ -19,6 +20,7 @@ import {
   readReceiptFile,
   savePaymentReceipt,
 } from '../src/services/receiptService.js';
+import { _takeRecordedEmails } from '../src/services/emailQueue.js';
 
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -50,6 +52,7 @@ describe('payment receipts', () => {
       BusinessPayment.deleteMany({}),
       Transaction.deleteMany({}),
       PaymentReceipt.deleteMany({}),
+      Notification.deleteMany({}),
     ]);
 
     businessUser = await User.create({
@@ -163,6 +166,7 @@ describe('payment receipts', () => {
       /does not look like/
     );
 
+    _takeRecordedEmails();
     const saved = await savePaymentReceipt(biz, {
       requestId: job._id,
       agencyId: agency._id,
@@ -170,6 +174,19 @@ describe('payment receipts', () => {
       originalName: 'bank-transfer.png',
       mimeType: 'image/png',
     });
+    const uploadedMail = _takeRecordedEmails();
+    assert.equal(uploadedMail.length, 1);
+    assert.equal(uploadedMail[0].kind, 'payment_receipt');
+    assert.equal(uploadedMail[0].to, 'receipt-agency@test.com');
+    assert.match(uploadedMail[0].text, /Receipt lobby/);
+    assert.match(uploadedMail[0].text, /£80\.00/);
+    assert.equal(uploadedMail[0].text.includes('uploads/'), false);
+    const agencyNotes = await Notification.find({ userId: agencyOwner._id, type: 'payment_receipt' });
+    assert.equal(agencyNotes.length, 1);
+    assert.equal(
+      await Notification.countDocuments({ userId: otherAgencyOwner._id }),
+      0
+    );
 
     const jobs = await listReceiptJobsForBusiness(biz, business._id);
     assert.equal(jobs.length, 1);
@@ -186,8 +203,20 @@ describe('payment receipts', () => {
     const file = await readReceiptFile(agencyUser, saved._id);
     assert.equal(file.receipt.mimeType, 'image/png');
 
+    _takeRecordedEmails();
     const marked = await markJobPaidFromReceipt(agencyUser, agency._id, saved._id);
     assert.equal(marked.alreadyPaid, false);
+    const paidMail = _takeRecordedEmails();
+    assert.equal(paidMail.length, 1);
+    assert.equal(paidMail[0].kind, 'payment_marked_paid');
+    assert.equal(paidMail[0].to, 'receipt-biz@test.com');
+    assert.match(paidMail[0].text, /Receipt Agency/);
+    assert.match(paidMail[0].text, /£80\.00/);
+    const businessNotes = await Notification.find({
+      userId: businessUser._id,
+      type: 'payment_marked_paid',
+    });
+    assert.equal(businessNotes.length, 1);
     const transaction = await Transaction.findOne({ requestId: job._id });
     assert.equal(transaction.status, 'paid');
     assert.equal(transaction.provider, 'receipt');
@@ -195,6 +224,7 @@ describe('payment receipts', () => {
 
     const again = await markJobPaidFromReceipt(agencyUser, agency._id, saved._id);
     assert.equal(again.alreadyPaid, true);
+    assert.equal(_takeRecordedEmails().length, 0);
   });
 
   it('blocks another business and another agency', async () => {
