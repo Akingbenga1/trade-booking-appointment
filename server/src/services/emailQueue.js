@@ -3,6 +3,18 @@ import { config } from '../config.js';
 
 /** @type {{ to: string, subject: string, text: string, html?: string, meta?: object }[]} */
 const queue = [];
+/** Recent jobs kept for tests. Capped so a long process does not grow without limit. */
+const recorded = [];
+
+export function htmlFromPlainText(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .split('\n')
+    .map((line) => `<p>${line || '&nbsp;'}</p>`)
+    .join('');
+}
 let processing = false;
 let transporter = null;
 let intervalStarted = false;
@@ -33,6 +45,14 @@ export function enqueueEmail(job) {
   const id = `mail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const entry = { ...job, meta: { ...(job.meta || {}), id, enqueuedAt: new Date().toISOString() } };
   queue.push(entry);
+  recorded.push({
+    to: entry.to,
+    subject: entry.subject,
+    text: entry.text,
+    html: entry.html || '',
+    kind: entry.meta?.kind || '',
+  });
+  if (recorded.length > 200) recorded.shift();
   console.log(
     `[email] enqueued id=${id} to=${entry.to} subject="${entry.subject}" queueDepth=${queue.length}`
   );
@@ -113,4 +133,9 @@ async function sendEmail(job) {
 /** Test helper */
 export function _emailQueueDepth() {
   return queue.length;
+}
+
+/** Test helper. Returns and clears emails queued since the last call. */
+export function _takeRecordedEmails() {
+  return recorded.splice(0, recorded.length);
 }
