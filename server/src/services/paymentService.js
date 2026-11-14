@@ -1,5 +1,7 @@
 import Stripe from 'stripe';
 import { CleaningRequest } from '../models/CleaningRequest.js';
+import { CleaningAgency } from '../models/CleaningAgency.js';
+import { bankToPublic } from './agencyBank.js';
 import { BusinessPayment } from '../models/BusinessPayment.js';
 import { Transaction } from '../models/Transaction.js';
 import { PaymentProviderEvent } from '../models/PaymentProviderEvent.js';
@@ -182,6 +184,16 @@ export async function confirmCheckoutPayment(requestId, user, sessionId) {
 
 export async function getPaymentForRequest(requestId, user) {
   const { request, businessPayment, transaction } = await assertCanPay(requestId, user);
+  const agencyId = request.assignedAgencyId || request.selectedAgencyId;
+  let agency = null;
+  if (agencyId) {
+    const row = await CleaningAgency.findById(agencyId).select(
+      'name +bankAccountName +bankName +bankSortCode +bankAccountNumber'
+    );
+    if (row) {
+      agency = { id: row._id, name: row.name, bank: bankToPublic(row) };
+    }
+  }
   return {
     request: {
       id: request._id,
@@ -192,6 +204,7 @@ export async function getPaymentForRequest(requestId, user) {
       scheduleEnd: request.scheduleEnd,
     },
     pay: payToPublic(businessPayment, transaction),
+    agency,
   };
 }
 

@@ -138,6 +138,27 @@ export default function PayForServicePage() {
                 {loading ? 'Redirecting…' : `Pay ${formatGbp(pay.totalAmount)} with Stripe`}
               </button>
             )}
+            <div className="item stack">
+              <strong>Bank transfer</strong>
+              {!data.agency ? (
+                <p className="muted">
+                  Choose an agency for this job first. Their official bank details will show here.
+                </p>
+              ) : data.agency.bank?.provided ? (
+                <div className="stack">
+                  <div>{data.agency.name}</div>
+                  <div>Account name: {data.agency.bank.accountName}</div>
+                  <div>Bank: {data.agency.bank.bankName}</div>
+                  <div>Sort code: {data.agency.bank.sortCode}</div>
+                  <div>Account number: {data.agency.bank.accountNumber}</div>
+                  <Link href={`/client/receipts?agencyId=${encodeURIComponent(data.agency.id)}`}>
+                    Upload payment receipt
+                  </Link>
+                </div>
+              ) : (
+                <p className="muted">{data.agency.name} has not added bank details yet.</p>
+              )}
+            </div>
           </div>
         ) : null}
 

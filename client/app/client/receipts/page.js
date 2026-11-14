@@ -14,6 +14,7 @@ export default function UploadReceiptPage() {
   const [businessId, setBusinessId] = useState('');
   const [jobs, setJobs] = useState([]);
   const [agencyId, setAgencyId] = useState('');
+  const [preferredAgencyId, setPreferredAgencyId] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busyId, setBusyId] = useState('');
@@ -21,6 +22,10 @@ export default function UploadReceiptPage() {
   useEffect(() => {
     if (user?.mustSetPassword) router.replace('/auth/set-password');
   }, [user, router]);
+
+  useEffect(() => {
+    setPreferredAgencyId(new URLSearchParams(window.location.search).get('agencyId') || '');
+  }, []);
 
   const loadJobs = useCallback(async (id) => {
     if (!id) {
@@ -30,10 +35,13 @@ export default function UploadReceiptPage() {
     const rows = await api(`/api/payments/receipts/jobs?businessId=${encodeURIComponent(id)}`);
     setJobs(rows);
     setAgencyId((current) => {
+      if (preferredAgencyId && rows.some((row) => String(row.agencyId) === preferredAgencyId)) {
+        return preferredAgencyId;
+      }
       if (current && rows.some((row) => String(row.agencyId) === current)) return current;
       return rows[0]?.agencyId ? String(rows[0].agencyId) : '';
     });
-  }, []);
+  }, [preferredAgencyId]);
 
   useEffect(() => {
     if (!user || user.mustSetPassword) return;

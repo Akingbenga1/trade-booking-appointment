@@ -7,6 +7,7 @@ import {
   getPaymentForRequest,
   listBusinessTransactions,
 } from '../services/paymentService.js';
+import { listBankDetailsForBusiness } from '../services/agencyBank.js';
 import {
   listReceiptJobsForBusiness,
   readReceiptFile,
@@ -79,6 +80,20 @@ router.post(
         req.body?.sessionId || req.query.session_id
       );
       res.json(result);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.get(
+  '/bank-details',
+  requireAuth,
+  requireRole('business'),
+  async (req, res) => {
+    try {
+      const rows = await listBankDetailsForBusiness(req.user, req.query.businessId);
+      res.json(rows);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
     }

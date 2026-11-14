@@ -209,8 +209,18 @@ export function TopBar({ title }) {
           </Link>
         ) : null}
         {user?.role === 'business' ? (
+          <Link href="/client/bank" className="muted">
+            Bank details
+          </Link>
+        ) : null}
+        {user?.role === 'business' ? (
           <Link href="/client/receipts" className="muted">
             Upload receipt
+          </Link>
+        ) : null}
+        {user?.role === 'cleaning_agency' ? (
+          <Link href="/agency/bank" className="muted">
+            Bank details
           </Link>
         ) : null}
         {user?.role === 'cleaning_agency' ? (
