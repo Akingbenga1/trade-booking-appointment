@@ -12,6 +12,10 @@ const cleaningAgencySchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    bankAccountName: { type: String, select: false },
+    bankName: { type: String, select: false },
+    bankSortCode: { type: String, select: false },
+    bankAccountNumber: { type: String, select: false },
   },
   { timestamps: true, collection: 'cleaning_agencies' }
 );

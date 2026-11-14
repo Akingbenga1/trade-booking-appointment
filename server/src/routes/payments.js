@@ -7,8 +7,11 @@ import {
   getPaymentForRequest,
   listBusinessTransactions,
 } from '../services/paymentService.js';
+import { listBankDetailsForBusiness } from '../services/agencyBank.js';
 import {
   listReceiptJobsForBusiness,
+  listReceiptsForCleaner,
+  markJobPaidByCleaner,
   readReceiptFile,
   savePaymentReceipt,
 } from '../services/receiptService.js';
@@ -86,6 +89,20 @@ router.post(
 );
 
 router.get(
+  '/bank-details',
+  requireAuth,
+  requireRole('business'),
+  async (req, res) => {
+    try {
+      const rows = await listBankDetailsForBusiness(req.user, req.query.businessId);
+      res.json(rows);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.get(
   '/receipts/jobs',
   requireAuth,
   requireRole('business'),
@@ -107,6 +124,8 @@ router.post('/receipts', requireAuth, requireRole('business'), (req, res) => {
       const receipt = await savePaymentReceipt(req.user, {
         requestId: req.body.requestId,
         agencyId: req.body.agencyId,
+        cleanerUserId: req.body.cleanerUserId,
+        statedAmount: req.body.statedAmount,
         buffer: req.file.buffer,
         originalName: req.file.originalname,
         mimeType: req.file.mimetype,
@@ -120,6 +139,25 @@ router.post('/receipts', requireAuth, requireRole('business'), (req, res) => {
       res.status(error.status || 500).json({ error: error.message });
     }
   });
+});
+
+router.get('/receipts/inbox', requireAuth, requireRole('cleaner'), async (req, res) => {
+  try {
+    res.json(await listReceiptsForCleaner(req.user));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/receipts/:receiptId/mark-paid', requireAuth, requireRole('cleaner'), async (req, res) => {
+  try {
+    const result = await markJobPaidByCleaner(req.user, req.params.receiptId, {
+      confirmMismatch: Boolean(req.body?.confirmMismatch),
+    });
+    res.json(result);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
 });
 
 router.get('/receipts/:receiptId/file', requireAuth, async (req, res) => {

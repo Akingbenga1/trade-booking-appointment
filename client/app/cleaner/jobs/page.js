@@ -198,6 +198,12 @@ export default function AssignedJobsPage() {
         <Link href="/cleaner">Back to home</Link>
         {' · '}
         {isStaff ? 'Agency staff' : 'Independent cleaner'}
+        {!isStaff ? (
+          <>
+            {' · '}
+            <Link href="/cleaner/receipts">Payment receipts</Link>
+          </>
+        ) : null}
       </p>
       {message ? <div className="success">{message}</div> : null}
       {error ? <div className="error">{error}</div> : null}

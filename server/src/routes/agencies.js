@@ -14,6 +14,7 @@ import { hydrateRequest, notDeletedFilter } from '../services/requestService.js'
 import { attachPayToRequests } from '../services/jobPay.js';
 import { listAgencyPayments } from '../services/paymentService.js';
 import { listReceiptsForAgency, markJobPaidFromReceipt } from '../services/receiptService.js';
+import { getAgencyBank, saveAgencyBank } from '../services/agencyBank.js';
 
 const router = Router();
 
@@ -75,6 +76,32 @@ router.post(
 );
 
 router.get(
+  '/:agencyId/bank',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      res.json(await getAgencyBank(req.user, req.params.agencyId));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.put(
+  '/:agencyId/bank',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      res.json(await saveAgencyBank(req.user, req.params.agencyId, req.body));
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.get(
   '/:agencyId/payments',
   requireAuth,
   requireRole('cleaning_agency'),
@@ -111,7 +138,8 @@ router.post(
       const result = await markJobPaidFromReceipt(
         req.user,
         req.params.agencyId,
-        req.params.receiptId
+        req.params.receiptId,
+        { confirmMismatch: Boolean(req.body?.confirmMismatch) }
       );
       res.json(result);
     } catch (err) {

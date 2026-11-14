@@ -17,10 +17,14 @@ import {
   listReceiptJobsForBusiness,
   listReceiptsForAgency,
   markJobPaidFromReceipt,
+  listReceiptsForCleaner,
+  markJobPaidByCleaner,
   readReceiptFile,
   savePaymentReceipt,
 } from '../src/services/receiptService.js';
+import { listBusinessTransactions } from '../src/services/paymentService.js';
 import { _takeRecordedEmails } from '../src/services/emailQueue.js';
+import { flushDeliveryQueue } from '../src/services/deliveryQueue.js';
 
 const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
@@ -173,7 +177,14 @@ describe('payment receipts', () => {
       buffer: png,
       originalName: 'bank-transfer.png',
       mimeType: 'image/png',
+      statedAmount: 50,
     });
+    await assert.rejects(
+      () => markJobPaidFromReceipt(agencyUser, agency._id, saved._id),
+      /Confirm that you checked the file/
+    );
+    saved.statedAmount = 80;
+    await saved.save();
     const uploadedMail = _takeRecordedEmails();
     assert.equal(uploadedMail.length, 1);
     assert.equal(uploadedMail[0].kind, 'payment_receipt');
@@ -204,7 +215,9 @@ describe('payment receipts', () => {
     assert.equal(file.receipt.mimeType, 'image/png');
 
     _takeRecordedEmails();
-    const marked = await markJobPaidFromReceipt(agencyUser, agency._id, saved._id);
+    const marked = await markJobPaidFromReceipt(agencyUser, agency._id, saved._id, {
+      confirmMismatch: false,
+    });
     assert.equal(marked.alreadyPaid, false);
     const paidMail = _takeRecordedEmails();
     assert.equal(paidMail.length, 1);
@@ -221,6 +234,10 @@ describe('payment receipts', () => {
     assert.equal(transaction.status, 'paid');
     assert.equal(transaction.provider, 'receipt');
     assert.ok(transaction.paidAt);
+    const txs = await listBusinessTransactions(biz, business._id);
+    const paidRow = txs.find((row) => String(row.requestId) === String(job._id));
+    assert.equal(String(paidRow.receiptId), String(saved._id));
+    assert.ok(paidRow.scheduleStart);
 
     const again = await markJobPaidFromReceipt(agencyUser, agency._id, saved._id);
     assert.equal(again.alreadyPaid, true);
@@ -239,6 +256,7 @@ describe('payment receipts', () => {
             buffer: png,
             originalName: 'nope.png',
             mimeType: 'image/png',
+            statedAmount: 80,
           }
         ),
       /Forbidden/
@@ -260,5 +278,62 @@ describe('payment receipts', () => {
         ),
       /Receipt not found/
     );
+  });
+
+  it('lets a cleaner receive a receipt and blocks a mismatched amount', async () => {
+    const cleaner = await User.create({
+      name: 'Indie Cleaner',
+      email: 'receipt-cleaner@test.com',
+      passwordHash: await bcrypt.hash('password123', 8),
+      role: 'cleaner',
+    });
+    const cleanerJob = await CleaningRequest.create({
+      clientId: businessUser._id,
+      businessId: business._id,
+      serviceDetails: 'Cleaner lobby',
+      scheduleStart: new Date('2026-12-03T09:00:00Z'),
+      scheduleEnd: new Date('2026-12-03T17:00:00Z'),
+      address: '9 Cleaner Row, London',
+      latitude: 51.5,
+      longitude: -0.12,
+      status: 'on_site',
+      assignedCleanerId: cleaner._id,
+    });
+    const transaction = await Transaction.create({
+      requestId: cleanerJob._id,
+      amount: 40,
+      currency: 'GBP',
+      status: 'unpaid',
+    });
+    await BusinessPayment.create({
+      businessId: business._id,
+      requestId: cleanerJob._id,
+      transactionId: transaction._id,
+      payRatePerHour: 10,
+      minimumWagePerHour: 12.71,
+      durationHours: 4,
+    });
+    const biz = { id: businessUser._id, role: 'business' };
+    const saved = await savePaymentReceipt(biz, {
+      requestId: cleanerJob._id,
+      cleanerUserId: cleaner._id,
+      buffer: png,
+      originalName: 'cleaner-pay.png',
+      mimeType: 'image/png',
+      statedAmount: 12,
+    });
+    const cleanerUser = { id: cleaner._id, role: 'cleaner' };
+    const listed = await listReceiptsForCleaner(cleanerUser);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].statedAmount, 12);
+    await assert.rejects(
+      () => markJobPaidByCleaner(cleanerUser, saved._id),
+      /Confirm that you checked the file/
+    );
+    const marked = await markJobPaidByCleaner(cleanerUser, saved._id, { confirmMismatch: true });
+    assert.equal(marked.paymentStatus, 'paid');
+    const updated = await Transaction.findById(transaction._id);
+    assert.equal(updated.status, 'paid');
+    await flushDeliveryQueue();
   });
 });

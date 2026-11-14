@@ -138,6 +138,38 @@ export default function PayForServicePage() {
                 {loading ? 'Redirecting…' : `Pay ${formatGbp(pay.totalAmount)} with Stripe`}
               </button>
             )}
+            <div className="item stack">
+              <strong>Bank transfer</strong>
+              {!data.agency && data.cleaner ? (
+                <div className="stack">
+                  <p className="muted">
+                    This job is with {data.cleaner.name}. Bank details are for an agency, so there
+                    is no agency account here. After you pay the cleaner, upload the receipt.
+                  </p>
+                  <Link href={`/client/receipts?cleanerId=${encodeURIComponent(data.cleaner.id)}`}>
+                    Upload payment receipt
+                  </Link>
+                </div>
+              ) : !data.agency ? (
+                <p className="muted">
+                  Nobody is assigned yet. Bank details appear here after an agency is chosen. You
+                  can upload a receipt once an agency or a cleaner is assigned.
+                </p>
+              ) : data.agency.bank?.provided ? (
+                <div className="stack">
+                  <div>{data.agency.name}</div>
+                  <div>Account name: {data.agency.bank.accountName}</div>
+                  <div>Bank: {data.agency.bank.bankName}</div>
+                  <div>Sort code: {data.agency.bank.sortCode}</div>
+                  <div>Account number: {data.agency.bank.accountNumber}</div>
+                  <Link href={`/client/receipts?agencyId=${encodeURIComponent(data.agency.id)}`}>
+                    Upload payment receipt
+                  </Link>
+                </div>
+              ) : (
+                <p className="muted">{data.agency.name} has not added bank details yet.</p>
+              )}
+            </div>
           </div>
         ) : null}
 

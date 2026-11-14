@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../components/ui';
-import { formatGbp } from '../../../lib/jobPay';
+import { formatGbp, jobStamp } from '../../../lib/jobPay';
 
 function payerLine(row) {
   const kind = row.payerKind === 'business' ? 'business' : 'personal client';
@@ -40,6 +40,7 @@ function PaymentTable({ rows }) {
               <td>
                 <div>{row.jobLabel}</div>
                 <div className="muted">{row.address}</div>
+                <div className="muted">{jobStamp(row)}</div>
               </td>
               <td>{amountLine(row)}</td>
               <td>

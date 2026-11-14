@@ -1,7 +1,10 @@
 import Stripe from 'stripe';
 import { CleaningRequest } from '../models/CleaningRequest.js';
+import { CleaningAgency } from '../models/CleaningAgency.js';
+import { bankToPublic } from './agencyBank.js';
 import { BusinessPayment } from '../models/BusinessPayment.js';
 import { Transaction } from '../models/Transaction.js';
+import { PaymentReceipt } from '../models/PaymentReceipt.js';
 import { PaymentProviderEvent } from '../models/PaymentProviderEvent.js';
 import { config } from '../config.js';
 import { isBusinessMember } from './businessService.js';
@@ -182,6 +185,21 @@ export async function confirmCheckoutPayment(requestId, user, sessionId) {
 
 export async function getPaymentForRequest(requestId, user) {
   const { request, businessPayment, transaction } = await assertCanPay(requestId, user);
+  const agencyId = request.assignedAgencyId || request.selectedAgencyId;
+  let agency = null;
+  if (agencyId) {
+    const row = await CleaningAgency.findById(agencyId).select(
+      'name +bankAccountName +bankName +bankSortCode +bankAccountNumber'
+    );
+    if (row) {
+      agency = { id: row._id, name: row.name, bank: bankToPublic(row) };
+    }
+  }
+  let cleaner = null;
+  if (!agency && request.assignedCleanerId) {
+    const person = await User.findById(request.assignedCleanerId).select('name');
+    if (person) cleaner = { id: person._id, name: person.name };
+  }
   return {
     request: {
       id: request._id,
@@ -192,6 +210,8 @@ export async function getPaymentForRequest(requestId, user) {
       scheduleEnd: request.scheduleEnd,
     },
     pay: payToPublic(businessPayment, transaction),
+    agency,
+    cleaner,
   };
 }
 
@@ -223,21 +243,26 @@ export async function listBusinessTransactions(user, businessId) {
   const txIds = ownership.map((o) => o.transactionId).filter(Boolean);
   const requestIds = ownership.map((o) => o.requestId);
 
-  const [transactions, requests] = await Promise.all([
+  const [transactions, requests, receipts] = await Promise.all([
     txIds.length ? Transaction.find({ _id: { $in: txIds } }) : [],
     requestIds.length
       ? CleaningRequest.find({ _id: { $in: requestIds } }).select(
-          'serviceDetails address status deletedAt'
+          'serviceDetails address status deletedAt scheduleStart scheduleEnd'
         )
+      : [],
+    requestIds.length
+      ? PaymentReceipt.find({ requestId: { $in: requestIds } }).select('requestId originalName')
       : [],
   ]);
 
   const txById = new Map(transactions.map((t) => [String(t._id), t]));
   const byRequest = new Map(requests.map((r) => [String(r._id), r]));
+  const receiptByRequest = new Map(receipts.map((row) => [String(row.requestId), row]));
 
   return ownership.map((bp) => {
     const tx = txById.get(String(bp.transactionId));
     const request = byRequest.get(String(bp.requestId));
+    const receipt = receiptByRequest.get(String(bp.requestId));
     return {
       id: tx?._id || bp._id,
       date: tx?.paidAt || tx?.updatedAt || bp.updatedAt || bp.createdAt,
@@ -245,10 +270,14 @@ export async function listBusinessTransactions(user, businessId) {
       currency: tx?.currency || 'GBP',
       requestId: bp.requestId,
       jobLabel: request?.serviceDetails || 'Cleaning request',
+      scheduleStart: request?.scheduleStart || null,
+      scheduleEnd: request?.scheduleEnd || null,
       requestStatus: request?.status || null,
       status: tx?.status || 'unpaid',
       providerId: tx?.providerPaymentId || tx?.providerCheckoutSessionId || null,
       receiptUrl: tx?.receiptUrl || null,
+      receiptId: receipt?._id || null,
+      receiptName: receipt?.originalName || null,
     };
   });
 }
@@ -273,7 +302,7 @@ export async function listAgencyPayments(user, agencyId) {
     assignedAgencyId: agencyId,
     deletedAt: null,
   })
-    .select('serviceDetails address status clientId businessId updatedAt')
+    .select('serviceDetails address status clientId businessId updatedAt scheduleStart scheduleEnd')
     .sort({ updatedAt: -1 });
 
   const requestIds = requests.map((row) => row._id);
@@ -306,6 +335,8 @@ export async function listAgencyPayments(user, agencyId) {
       currency: tx?.currency || 'GBP',
       jobLabel: request.serviceDetails,
       address: request.address,
+      scheduleStart: request.scheduleStart,
+      scheduleEnd: request.scheduleEnd,
       requestStatus: request.status,
       status: tx?.status || 'none',
       payerName: isBusiness
