@@ -7,6 +7,7 @@ import { User } from '../src/models/User.js';
 import { CleaningAgency } from '../src/models/CleaningAgency.js';
 import { AgencyMembership } from '../src/models/AgencyMembership.js';
 import { createAgencyStaffMany } from '../src/services/agencyService.js';
+import { _takeRecordedEmails } from '../src/services/emailQueue.js';
 
 describe('bulk agency staff creation', () => {
   let owner;
@@ -70,6 +71,7 @@ describe('bulk agency staff creation', () => {
   });
 
   it('creates new staff, links an existing staff account, and reports bad rows', async () => {
+    _takeRecordedEmails();
     const result = await createAgencyStaffMany(owner._id, agency._id, [
       { name: 'Ada Cleaner', email: 'Ada.Cleaner@test.com', password: 'password123' },
       { name: 'Existing Staff', email: 'bulk-existing@test.com', password: 'password123' },
@@ -91,6 +93,14 @@ describe('bulk agency staff creation', () => {
       userId: (await User.findOne({ email: 'ada.cleaner@test.com' }))._id,
     });
     assert.equal(membership.memberRole, 'staff');
+
+    const welcome = _takeRecordedEmails().filter((mail) => mail.kind === 'staff_welcome');
+    assert.equal(welcome.length, 1);
+    assert.equal(welcome[0].to, 'ada.cleaner@test.com');
+    assert.match(welcome[0].text, /Bulk Agency/);
+    assert.match(welcome[0].text, /Sign-in email: ada.cleaner@test.com/);
+    assert.equal(welcome[0].text.includes('password123'), false);
+    assert.equal(welcome[0].html.includes('password123'), false);
   });
 
   it('rejects a person who is not an agency owner', async () => {
