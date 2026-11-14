@@ -12,6 +12,7 @@ import {
 } from '../services/agencyService.js';
 import { hydrateRequest, notDeletedFilter } from '../services/requestService.js';
 import { attachPayToRequests } from '../services/jobPay.js';
+import { listAgencyPayments } from '../services/paymentService.js';
 
 const router = Router();
 
@@ -66,6 +67,20 @@ router.post(
         req.body?.staff
       );
       res.status(201).json(result);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
+
+router.get(
+  '/:agencyId/payments',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      const rows = await listAgencyPayments(req.user, req.params.agencyId);
+      res.json(rows);
     } catch (err) {
       res.status(err.status || 500).json({ error: err.message });
     }

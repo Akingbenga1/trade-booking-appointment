@@ -153,6 +153,9 @@ export default function AgencyPage() {
   return (
     <div className="shell">
       <TopBar title="Cleaning agency" />
+      <p className="muted">
+        <Link href="/agency/payments">View payments</Link>
+      </p>
       {error ? <div className="error">{error}</div> : null}
       {message ? <div className="success">{message}</div> : null}
 
