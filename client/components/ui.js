@@ -224,6 +224,11 @@ export function TopBar({ title }) {
           </Link>
         ) : null}
         {user?.role === 'cleaning_agency' ? (
+          <Link href="/agency/staff" className="muted">
+            Staff
+          </Link>
+        ) : null}
+        {user?.role === 'cleaning_agency' ? (
           <Link href="/agency/bank" className="muted">
             Bank details
           </Link>

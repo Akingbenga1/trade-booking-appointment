@@ -353,6 +353,12 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 }
 .dtrp-day:hover { background: var(--accent-soft); }
 .dtrp-day:disabled { opacity: 0.35; cursor: not-allowed; background: transparent; }
+
+.staff-summary {
+  cursor: pointer;
+  list-style: none;
+}
+.staff-summary::-webkit-details-marker { display: none; }
 .dtrp-day.in-range { background: var(--accent-soft); }
 .dtrp-day.is-start,
 .dtrp-day.is-end {

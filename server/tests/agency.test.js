@@ -26,6 +26,7 @@ import {
   staffRespondToAssignment,
   advanceBooking,
 } from '../src/services/requestService.js';
+import { listAgencyStaff } from '../src/services/agencyService.js';
 import bcrypt from 'bcryptjs';
 import { config } from '../src/config.js';
 
@@ -349,5 +350,13 @@ describe('cleaning agency booking', () => {
     const pay = await StaffJobPay.findOne({ requestId: req._id, staffUserId: staff._id });
     assert.equal(pay.durationHours, 4);
     assert.equal(pay.totalAmount, 52);
+
+    const listed = await listAgencyStaff(agency._id);
+    const row = listed.find((item) => String(item.user._id) === String(staff._id));
+    const shift = row.jobs.find((job) => job.serviceDetails === 'Calendar shift');
+    assert.ok(shift);
+    assert.equal(shift.confirmStatus, 'pending');
+    assert.equal(new Date(shift.workStart).getTime(), scheduleStart.getTime());
+    assert.equal(shift.pay.durationHours, 4);
   });
 });

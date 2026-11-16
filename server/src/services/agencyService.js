@@ -1,6 +1,9 @@
 import bcrypt from 'bcryptjs';
 import { CleaningAgency } from '../models/CleaningAgency.js';
 import { AgencyMembership } from '../models/AgencyMembership.js';
+import { CleaningRequest } from '../models/CleaningRequest.js';
+import { JobAssignment } from '../models/JobAssignment.js';
+import { StaffJobPay } from '../models/StaffJobPay.js';
 import { User } from '../models/User.js';
 import { config } from '../config.js';
 import { parsePlaceFields } from './place.js';
@@ -37,12 +40,77 @@ export async function listAgencyStaff(agencyId) {
   const memberships = await AgencyMembership.find({
     agencyId,
     memberRole: 'staff',
-  }).populate('userId', 'name email role isAvailable currentLocation isDisabled');
-  return memberships.map((m) => ({
-    membershipId: m._id,
-    memberRole: m.memberRole,
-    user: m.userId,
-  }));
+  }).populate(
+    'userId',
+    'name email role isAvailable currentLocation isDisabled mustSetPassword createdAt'
+  );
+  const userIds = memberships.map((row) => row.userId?._id).filter(Boolean);
+  const assignments = userIds.length
+    ? await JobAssignment.find({
+        agencyId,
+        staffUserId: { $in: userIds },
+        confirmStatus: { $in: ['pending', 'confirmed'] },
+      }).lean()
+    : [];
+  const requestIds = [...new Set(assignments.map((row) => String(row.requestId)))];
+  const [requests, pays] = await Promise.all([
+    requestIds.length
+      ? CleaningRequest.find({ _id: { $in: requestIds } })
+          .select('serviceDetails address status scheduleStart scheduleEnd')
+          .lean()
+      : [],
+    assignments.length
+      ? StaffJobPay.find({ assignmentId: { $in: assignments.map((row) => row._id) } })
+          .select('assignmentId payRatePerHour durationHours totalAmount currency')
+          .lean()
+      : [],
+  ]);
+  const requestById = new Map(requests.map((row) => [String(row._id), row]));
+  const payByAssignment = new Map(pays.map((row) => [String(row.assignmentId), row]));
+  const jobsByUser = new Map();
+  for (const row of assignments) {
+    const key = String(row.staffUserId);
+    const request = requestById.get(String(row.requestId));
+    const pay = payByAssignment.get(String(row._id));
+    const job = {
+      requestId: row.requestId,
+      serviceDetails: request?.serviceDetails || 'Cleaning job',
+      address: request?.address || '',
+      status: request?.status || null,
+      scheduleStart: request?.scheduleStart || null,
+      scheduleEnd: request?.scheduleEnd || null,
+      confirmStatus: row.confirmStatus,
+      workStart: row.workStart || null,
+      workEnd: row.workEnd || null,
+      assignedAt: row.assignedAt || null,
+      pay: pay
+        ? {
+            payRatePerHour: pay.payRatePerHour,
+            durationHours: pay.durationHours,
+            totalAmount: pay.totalAmount,
+            currency: pay.currency || 'GBP',
+          }
+        : null,
+    };
+    const list = jobsByUser.get(key) || [];
+    list.push(job);
+    jobsByUser.set(key, list);
+  }
+
+  return memberships
+    .filter((row) => row.userId)
+    .map((row) => ({
+      membershipId: row._id,
+      memberRole: row.memberRole,
+      joinedAt: row.createdAt,
+      user: row.userId,
+      jobs: (jobsByUser.get(String(row.userId._id)) || []).sort((a, b) => {
+        const left = a.assignedAt ? new Date(a.assignedAt).getTime() : 0;
+        const right = b.assignedAt ? new Date(b.assignedAt).getTime() : 0;
+        return right - left;
+      }),
+    }))
+    .sort((a, b) => String(a.user.name || '').localeCompare(String(b.user.name || '')));
 }
 
 async function addAgencyMembership(agencyId, userId, memberRole) {

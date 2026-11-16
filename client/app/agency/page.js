@@ -154,6 +154,8 @@ export default function AgencyPage() {
     <div className="shell">
       <TopBar title="Cleaning agency" />
       <p className="muted">
+        <Link href="/agency/staff">Staff</Link>
+        {' · '}
         <Link href="/agency/payments">View payments</Link>
         {' · '}
         <Link href="/agency/receipts">Payment receipts</Link>
@@ -226,7 +228,11 @@ export default function AgencyPage() {
         <div className="card stack">
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <h2 style={{ margin: 0 }}>Staff</h2>
-            <Link href="/agency/staff/bulk">add many staff</Link>
+            <span>
+              <Link href="/agency/staff">View staff</Link>
+              {' · '}
+              <Link href="/agency/staff/bulk">add many staff</Link>
+            </span>
           </div>
           <form className="stack" onSubmit={createStaff}>
             <label>
@@ -258,14 +264,6 @@ export default function AgencyPage() {
             </label>
             <button type="submit">Create staff</button>
           </form>
-          <div className="list">
-            {staff.map((s) => (
-              <div className="item row" key={String(s.membershipId)}>
-                <span>{s.user?.name}</span>
-                <span className="muted">{s.user?.email}</span>
-              </div>
-            ))}
-          </div>
         </div>
       </div>
 
