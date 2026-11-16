@@ -28,6 +28,20 @@ const COMPLETION = {
   cancelled: 'Cancelled before completion.',
 };
 
+function scheduleLabel(request) {
+  if (request?.jobType === 'fixed') return 'One visit';
+  if (request?.jobType === 'recurring_indefinite') return 'Weekly, no end';
+  if (request?.jobType === 'recurring_until') {
+    const until = request.recurrenceUntil ? new Date(request.recurrenceUntil) : null;
+    const date =
+      until && !Number.isNaN(until.getTime())
+        ? until.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+        : '';
+    return date ? `Weekly until ${date}` : 'Weekly until a date';
+  }
+  return 'One window';
+}
+
 function agencyIdOf(request) {
   const value = request?.assignedAgencyId;
   if (!value) return '';
@@ -74,6 +88,7 @@ function OfferCard({ item, mode, busy, onInterest, onLock, onProgress, onAssign 
         <StatusBadge status={request.status} />
         <StatusBadge status={offer.status} />
         <span className="muted">{item.jobType}</span>
+        <span className="job-kind">{scheduleLabel(request)}</span>
       </div>
       <strong>{request.serviceDetails}</strong>
       <div>{request.address}</div>

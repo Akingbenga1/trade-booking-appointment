@@ -251,6 +251,15 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .badge.accepted, .badge.live { background: #dff5e6; color: var(--ok); }
 .badge.rejected, .badge.ignored, .badge.closed, .badge.unavailable { background: #f0ece4; color: #666; }
 .badge.client, .badge.admin, .badge.cleaner { background: #eee; color: #444; }
+.job-kind {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 .badge.paid { background: #dff5e6; color: var(--ok); }
 .badge.unpaid, .badge.failed { background: #f8e2e2; color: var(--danger); }
 
