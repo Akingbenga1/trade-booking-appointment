@@ -85,6 +85,12 @@ export default function HomePage() {
           {' · '}
           <Link href="/register/agency">Register a cleaning agency</Link>
         </p>
+        <p className="muted">
+          No account needed:{' '}
+          <Link href="/jobs">Browse job offers</Link>
+          {' · '}
+          <Link href="/tools">Cleaning tools and equipment</Link>
+        </p>
         <div className="demo">
           Demo: client@demo.com · cleaner1@demo.com · cleaner2@demo.com · admin@demo.com
           <br />

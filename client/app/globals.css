@@ -32,6 +32,32 @@ a { color: var(--accent); }
   padding: 24px 16px 48px;
 }
 
+.public-top {
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.public-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: center;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.kit-section {
+  margin-top: 28px;
+}
+
+.tool-card p {
+  margin: 0;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;
