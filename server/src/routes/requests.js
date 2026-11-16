@@ -221,6 +221,50 @@ router.get('/assigned', requireAuth, requireRole('cleaner', 'agency_staff'), asy
   res.json(plain);
 });
 
+function toPublicBoardOffer(doc) {
+  const businessName = doc.businessId?.name || '';
+  const pay = doc.pay
+    ? {
+        payRatePerHour: doc.pay.payRatePerHour,
+        durationHours: doc.pay.durationHours,
+        totalAmount: doc.pay.totalAmount,
+        currency: doc.pay.currency || 'GBP',
+      }
+    : null;
+  return {
+    id: doc._id,
+    serviceDetails: doc.serviceDetails,
+    address: doc.address,
+    status: doc.status,
+    scheduleStart: doc.scheduleStart,
+    scheduleEnd: doc.scheduleEnd,
+    jobType: doc.jobType || '',
+    durationDays: doc.durationDays,
+    durationExtraHours: doc.durationExtraHours,
+    visitHours: doc.visitHours,
+    visitCount: doc.visitCount,
+    totalHours: doc.totalHours,
+    recurrenceUntil: doc.recurrenceUntil,
+    postedBy: businessName ? 'business' : 'personal',
+    businessName,
+    pay,
+    createdAt: doc.createdAt,
+  };
+}
+
+router.get('/board', async (_req, res) => {
+  try {
+    const list = await CleaningRequest.find(notDeletedFilter)
+      .sort({ createdAt: -1 })
+      .populate('businessId', 'name');
+    const plain = list.map((doc) => doc.toObject());
+    await attachPayToRequests(plain);
+    res.json(plain.map(toPublicBoardOffer));
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
 router.get('/:id/interests', requireAuth, requireRole('client', 'business', 'admin'), async (req, res) => {
   try {
     const doc = await CleaningRequest.findById(req.params.id);
