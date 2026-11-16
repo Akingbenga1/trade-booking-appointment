@@ -8,6 +8,7 @@ import { StatusBadge, TopBar, useRequireRole } from '../../../components/ui';
 import { formatScheduleRange } from '../../../components/DateTimeRangePicker';
 import { formatPaySummary } from '../../../lib/jobPay';
 import { scheduleKindLabel } from '../../../lib/jobHours';
+import FilterBar, { matchesQuery } from '../../../components/FilterBar';
 
 const ACTIVE = new Set(['assigned', 'en_route', 'on_site', 'in_progress']);
 
@@ -28,6 +29,37 @@ const COMPLETION = {
   unmatched: 'Closed with no match.',
   cancelled: 'Cancelled before completion.',
 };
+
+function offerMatches(item, filters) {
+  const request = item.request || {};
+  if (
+    !matchesQuery(filters.query, [
+      request.serviceDetails,
+      request.address,
+      item.businessName,
+      item.owner?.name,
+      item.owner?.email,
+    ])
+  ) {
+    return false;
+  }
+  if (filters.who === 'business' && item.jobType !== 'Business') return false;
+  if (filters.who === 'personal' && item.jobType === 'Business') return false;
+  if (filters.kind === 'fixed' && request.jobType !== 'fixed') return false;
+  if (filters.kind === 'weekly' && request.jobType !== 'recurring_indefinite') return false;
+  if (filters.kind === 'until' && request.jobType !== 'recurring_until') return false;
+  if (filters.kind === 'window' && request.jobType) return false;
+  if (filters.status !== 'any' && request.status !== filters.status) return false;
+  if (filters.when !== 'any') {
+    const start = new Date(request.scheduleStart);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const upcoming = !Number.isNaN(start.getTime()) && start.getTime() >= today.getTime();
+    if (filters.when === 'upcoming' && !upcoming) return false;
+    if (filters.when === 'started' && upcoming) return false;
+  }
+  return true;
+}
 
 function agencyIdOf(request) {
   const value = request?.assignedAgencyId;
@@ -181,6 +213,11 @@ export default function AllOffersPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  const [who, setWho] = useState('any');
+  const [kind, setKind] = useState('any');
+  const [status, setStatus] = useState('any');
+  const [when, setWhen] = useState('any');
 
   const load = useCallback(async () => {
     const list = await api('/api/agencies/mine');
@@ -256,7 +293,17 @@ export default function AllOffersPage() {
 
   if (!user || user.mustSetPassword) return null;
 
-  const groups = splitOffers(items, agencyId);
+  const filters = { query, who, kind, status, when };
+  const filtered = items.filter((item) => offerMatches(item, filters));
+  const groups = splitOffers(filtered, agencyId);
+  const filtersActive = Boolean(query.trim() || who !== 'any' || kind !== 'any' || status !== 'any' || when !== 'any');
+  function clearFilters() {
+    setQuery('');
+    setWho('any');
+    setKind('any');
+    setStatus('any');
+    setWhen('any');
+  }
 
   return (
     <div className="shell">
@@ -280,6 +327,44 @@ export default function AllOffersPage() {
           </label>
         </div>
       ) : null}
+      <FilterBar
+        query={query}
+        onQuery={setQuery}
+        placeholder="Search job, address, or business"
+        count={filtered.length}
+        total={items.length}
+        active={filtersActive}
+        onClear={clearFilters}
+      >
+        <select aria-label="Who posted the job" value={who} onChange={(event) => setWho(event.target.value)}>
+          <option value="any">Business and personal</option>
+          <option value="business">Business</option>
+          <option value="personal">Personal client</option>
+        </select>
+        <select aria-label="Schedule type" value={kind} onChange={(event) => setKind(event.target.value)}>
+          <option value="any">Any schedule</option>
+          <option value="fixed">One visit</option>
+          <option value="weekly">Weekly, no end</option>
+          <option value="until">Weekly until a date</option>
+          <option value="window">One window</option>
+        </select>
+        <select aria-label="Job status" value={status} onChange={(event) => setStatus(event.target.value)}>
+          <option value="any">Any status</option>
+          <option value="open">Open</option>
+          <option value="assigned">Assigned</option>
+          <option value="en_route">On the way</option>
+          <option value="on_site">On site</option>
+          <option value="in_progress">In progress</option>
+          <option value="completed">Completed</option>
+          <option value="cancelled">Cancelled</option>
+          <option value="unmatched">Unmatched</option>
+        </select>
+        <select aria-label="Start date" value={when} onChange={(event) => setWhen(event.target.value)}>
+          <option value="any">Any date</option>
+          <option value="upcoming">Starts today or later</option>
+          <option value="started">Already started</option>
+        </select>
+      </FilterBar>
       <div className="stack">
         <Panel
           title="Current offers"

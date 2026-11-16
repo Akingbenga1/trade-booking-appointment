@@ -8,6 +8,7 @@ import { StatusBadge, TopBar, useRequireRole } from '../../../../../components/u
 import { DateTimeRangePicker, formatScheduleRange } from '../../../../../components/DateTimeRangePicker';
 import { MINIMUM_WAGE_PER_HOUR, formatGbp } from '../../../../../lib/jobPay';
 import { describeJob, HOURS_PER_DAY } from '../../../../../lib/jobHours';
+import FilterBar, { matchesQuery } from '../../../../../components/FilterBar';
 
 const OPEN_FOR_CREW = new Set(['assigned', 'en_route', 'on_site', 'in_progress']);
 
@@ -57,6 +58,7 @@ export default function AssignStaffPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const [staffQuery, setStaffQuery] = useState('');
 
   const load = useCallback(async () => {
     const request = await api(`/api/requests/${requestId}`);
@@ -87,6 +89,9 @@ export default function AssignStaffPage() {
     const id = personId(row.user);
     return id && !onJob.has(id);
   });
+  const shownAvailable = available.filter((row) =>
+    matchesQuery(staffQuery, [row.user?.name, row.user?.email])
+  );
   const canEdit = Boolean(job && OPEN_FOR_CREW.has(job.status) && job.assignedAgencyId);
 
   function rateFor(id) {
@@ -285,9 +290,22 @@ export default function AssignStaffPage() {
                   No more staff to add.{' '}
                   <Link href="/agency">Create a staff account on the agency home.</Link>
                 </p>
+              ) : (
+                <FilterBar
+                  query={staffQuery}
+                  onQuery={setStaffQuery}
+                  placeholder="Search staff name or email"
+                  count={shownAvailable.length}
+                  total={available.length}
+                  active={Boolean(staffQuery.trim())}
+                  onClear={() => setStaffQuery('')}
+                />
+              )}
+              {available.length > 0 && shownAvailable.length === 0 ? (
+                <p className="muted">No staff match that name.</p>
               ) : null}
               <div className="list">
-                {available.map((row) => {
+                {shownAvailable.map((row) => {
                   const id = personId(row.user);
                   const chosenWindow = picked[id] ? windowFor(id) : null;
                   const share = chosenWindow

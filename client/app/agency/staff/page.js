@@ -6,6 +6,18 @@ import { useRouter } from 'next/navigation';
 import { api } from '../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../components/ui';
 import { formatGbp } from '../../../lib/jobPay';
+import FilterBar, { matchesQuery } from '../../../components/FilterBar';
+
+function staffVisible(row, query, availability, jobFilter) {
+  const person = row.user || {};
+  const jobs = row.jobs || [];
+  if (!matchesQuery(query, [person.name, person.email])) return false;
+  if (availability === 'available' && !person.isAvailable) return false;
+  if (availability === 'away' && person.isAvailable) return false;
+  if (jobFilter === 'on' && jobs.length === 0) return false;
+  if (jobFilter === 'off' && jobs.length > 0) return false;
+  return true;
+}
 
 function personId(person) {
   if (!person) return '';
@@ -34,6 +46,9 @@ export default function AgencyStaffPage() {
   const [agencyId, setAgencyId] = useState('');
   const [staff, setStaff] = useState([]);
   const [openId, setOpenId] = useState('');
+  const [query, setQuery] = useState('');
+  const [availability, setAvailability] = useState('any');
+  const [jobFilter, setJobFilter] = useState('any');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -64,6 +79,8 @@ export default function AgencyStaffPage() {
   }, [user, agencyId, load]);
 
   if (!user || user.mustSetPassword) return null;
+
+  const visibleStaff = staff.filter((row) => staffVisible(row, query, availability, jobFilter));
 
   return (
     <div className="shell">
@@ -96,8 +113,33 @@ export default function AgencyStaffPage() {
         {staff.length === 0 ? (
           <p className="muted">No staff yet. Create an account on the agency home, or add many from a file.</p>
         ) : null}
+        <FilterBar
+          query={query}
+          onQuery={setQuery}
+          placeholder="Search name or email"
+          count={visibleStaff.length}
+          total={staff.length}
+          active={Boolean(query.trim() || availability !== 'any' || jobFilter !== 'any')}
+          onClear={() => {
+            setQuery('');
+            setAvailability('any');
+            setJobFilter('any');
+          }}
+        >
+          <select aria-label="Availability" value={availability} onChange={(event) => setAvailability(event.target.value)}>
+            <option value="any">Any availability</option>
+            <option value="available">Available</option>
+            <option value="away">Not available</option>
+          </select>
+          <select aria-label="Jobs" value={jobFilter} onChange={(event) => setJobFilter(event.target.value)}>
+            <option value="any">Any jobs</option>
+            <option value="on">On a job</option>
+            <option value="off">No jobs</option>
+          </select>
+        </FilterBar>
         <div className="staff-list">
-          {staff.map((row) => {
+          {staff.length > 0 && visibleStaff.length === 0 ? <p className="muted">No staff match.</p> : null}
+          {visibleStaff.map((row) => {
             const person = row.user || {};
             const jobs = row.jobs || [];
             const id = String(row.membershipId || personId(person));

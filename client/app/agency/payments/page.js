@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../components/ui';
 import { formatGbp, jobStamp } from '../../../lib/jobPay';
+import FilterBar, { matchesQuery } from '../../../components/FilterBar';
 
 function payerLine(row) {
   const kind = row.payerKind === 'business' ? 'business' : 'personal client';
@@ -69,6 +70,9 @@ export default function AgencyPaymentsPage() {
   const [rows, setRows] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [payFilter, setPayFilter] = useState('any');
+  const [fromDate, setFromDate] = useState('');
 
   useEffect(() => {
     if (user?.mustSetPassword) router.replace('/auth/set-password');
@@ -109,8 +113,23 @@ export default function AgencyPaymentsPage() {
 
   if (!user || user.mustSetPassword) return null;
 
-  const paid = rows.filter((row) => row.status === 'paid');
-  const waiting = rows.filter((row) => row.status !== 'paid');
+  function dayKey(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${month}-${day}`;
+  }
+  const filtered = rows.filter((row) => {
+    if (!matchesQuery(query, [row.jobLabel, row.payerName, row.address])) return false;
+    if (payFilter === 'paid' && row.status !== 'paid') return false;
+    if (payFilter === 'waiting' && row.status === 'paid') return false;
+    if (fromDate && dayKey(row.date) < fromDate) return false;
+    return true;
+  });
+  const paid = filtered.filter((row) => row.status === 'paid');
+  const waiting = filtered.filter((row) => row.status !== 'paid');
   const paidTotal = paid.reduce((sum, row) => sum + Number(row.amount || 0), 0);
 
   return (
@@ -136,7 +155,33 @@ export default function AgencyPaymentsPage() {
           </label>
         </div>
       ) : null}
+      <FilterBar
+        query={query}
+        onQuery={setQuery}
+        placeholder="Search job or payer"
+        count={filtered.length}
+        total={rows.length}
+        active={Boolean(query.trim() || payFilter !== 'any' || fromDate)}
+        onClear={() => {
+          setQuery('');
+          setPayFilter('any');
+          setFromDate('');
+        }}
+      >
+        <select aria-label="Payment" value={payFilter} onChange={(event) => setPayFilter(event.target.value)}>
+          <option value="any">Paid and waiting</option>
+          <option value="paid">Paid</option>
+          <option value="waiting">Not paid yet</option>
+        </select>
+        <input
+          type="date"
+          aria-label="On or after"
+          value={fromDate}
+          onChange={(event) => setFromDate(event.target.value)}
+        />
+      </FilterBar>
       <div className="stack">
+        {payFilter !== 'waiting' ? (
         <div className="card stack">
           <h2>Paid</h2>
           <p className="muted">
@@ -145,6 +190,8 @@ export default function AgencyPaymentsPage() {
           </p>
           {loading ? <p className="muted">Loading…</p> : <PaymentTable rows={paid} />}
         </div>
+        ) : null}
+        {payFilter !== 'paid' ? (
         <div className="card stack">
           <h2>Not paid yet</h2>
           <p className="muted">
@@ -152,6 +199,7 @@ export default function AgencyPaymentsPage() {
           </p>
           {loading ? <p className="muted">Loading…</p> : <PaymentTable rows={waiting} />}
         </div>
+        ) : null}
       </div>
     </div>
   );

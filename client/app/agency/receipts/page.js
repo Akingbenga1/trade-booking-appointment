@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { api, apiBlob } from '../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../components/ui';
 import { formatGbp, jobStamp } from '../../../lib/jobPay';
+import FilterBar, { matchesQuery } from '../../../components/FilterBar';
 
 export default function AgencyReceiptsPage() {
   const router = useRouter();
@@ -20,6 +21,8 @@ export default function AgencyReceiptsPage() {
   const [previewUrl, setPreviewUrl] = useState('');
   const [previewType, setPreviewType] = useState('');
   const [confirmed, setConfirmed] = useState({});
+  const [query, setQuery] = useState('');
+  const [paidFilter, setPaidFilter] = useState('any');
 
   function amountsDiffer(row) {
     if (row.statedAmount == null || row.amount == null) return false;
@@ -104,6 +107,15 @@ export default function AgencyReceiptsPage() {
 
   if (!user || user.mustSetPassword) return null;
 
+  const visible = rows.filter((row) => {
+    if (!matchesQuery(query, [row.serviceDetails, row.businessName, row.originalName, row.address])) {
+      return false;
+    }
+    if (paidFilter === 'paid' && row.paymentStatus !== 'paid') return false;
+    if (paidFilter === 'unpaid' && row.paymentStatus === 'paid') return false;
+    return true;
+  });
+
   return (
     <div className="shell">
       <TopBar title="Payment receipts" />
@@ -126,6 +138,24 @@ export default function AgencyReceiptsPage() {
           </label>
         </div>
       ) : null}
+      <FilterBar
+        query={query}
+        onQuery={setQuery}
+        placeholder="Search job, business, or file"
+        count={visible.length}
+        total={rows.length}
+        active={Boolean(query.trim() || paidFilter !== 'any')}
+        onClear={() => {
+          setQuery('');
+          setPaidFilter('any');
+        }}
+      >
+        <select aria-label="Paid" value={paidFilter} onChange={(event) => setPaidFilter(event.target.value)}>
+          <option value="any">Paid and unpaid</option>
+          <option value="paid">Marked paid</option>
+          <option value="unpaid">Not marked paid</option>
+        </select>
+      </FilterBar>
       <div className="card stack">
         <h2>Uploaded receipts</h2>
         <p className="muted">
@@ -133,7 +163,8 @@ export default function AgencyReceiptsPage() {
         </p>
         <div className="list">
           {rows.length === 0 ? <p className="muted">No receipts uploaded yet.</p> : null}
-          {rows.map((row) => (
+          {rows.length > 0 && visible.length === 0 ? <p className="muted">No receipts match.</p> : null}
+          {visible.map((row) => (
             <div className="item stack" key={String(row.id)}>
               <div className="row">
                 <strong>{row.serviceDetails}</strong>

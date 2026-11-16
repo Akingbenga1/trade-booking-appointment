@@ -260,6 +260,26 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   background: var(--accent-soft);
   color: var(--accent);
 }
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.filter-bar input,
+.filter-bar select {
+  width: auto;
+  flex: 1 1 160px;
+  min-width: 140px;
+}
+
+.filter-bar input {
+  flex-grow: 2;
+  min-width: 220px;
+}
+.filter-bar button { flex: none; }
+.filter-count { flex: 1 1 100%; margin: 0; }
 .offer-detail { display: grid; gap: 16px; }
 .offer-hero h1 {
   margin: 8px 0 4px;

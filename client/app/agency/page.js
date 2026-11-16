@@ -8,6 +8,7 @@ import { StatusBadge, TopBar, useRequireRole } from '../../components/ui';
 import { formatScheduleRange } from '../../components/DateTimeRangePicker';
 import JobMap from '../../components/JobMap';
 import { MINIMUM_WAGE_PER_HOUR, formatPaySummary } from '../../lib/jobPay';
+import FilterBar, { matchesQuery } from '../../components/FilterBar';
 
 const NEXT_STEP = {
   assigned: 'en_route',
@@ -31,6 +32,8 @@ export default function AgencyPage() {
     email: '',
     password: '',
   });
+  const [jobQuery, setJobQuery] = useState('');
+  const [jobStage, setJobStage] = useState('any');
   const [assignForm, setAssignForm] = useState({
     requestId: '',
     staffUserId: '',
@@ -149,6 +152,18 @@ export default function AgencyPage() {
   if (!user || user.mustSetPassword) return null;
 
   const pendingOffers = offers.filter((o) => o.offer?.status === 'pending');
+  const working = new Set(['assigned', 'en_route', 'on_site', 'in_progress']);
+  const finished = new Set(['completed', 'cancelled', 'unmatched']);
+  const visibleJobs = jobs.filter((job) => {
+    if (!matchesQuery(jobQuery, [job.serviceDetails, job.address])) return false;
+    if (jobStage === 'working' && !working.has(job.status)) return false;
+    if (jobStage === 'finished' && !finished.has(job.status)) return false;
+    return true;
+  });
+  const jobChoices =
+    assignForm.requestId && !visibleJobs.some((job) => String(job._id) === String(assignForm.requestId))
+      ? jobs.filter((job) => String(job._id) === String(assignForm.requestId)).concat(visibleJobs)
+      : visibleJobs;
 
   return (
     <div className="shell">
@@ -270,6 +285,24 @@ export default function AgencyPage() {
 
       <div className="card stack" style={{ marginTop: 16 }}>
         <h2>Assigned jobs</h2>
+        <FilterBar
+          query={jobQuery}
+          onQuery={setJobQuery}
+          placeholder="Search job name or address"
+          count={visibleJobs.length}
+          total={jobs.length}
+          active={Boolean(jobQuery.trim() || jobStage !== 'any')}
+          onClear={() => {
+            setJobQuery('');
+            setJobStage('any');
+          }}
+        >
+          <select aria-label="Job stage" value={jobStage} onChange={(event) => setJobStage(event.target.value)}>
+            <option value="any">Any stage</option>
+            <option value="working">Still working</option>
+            <option value="finished">Finished</option>
+          </select>
+        </FilterBar>
         <form className="stack" onSubmit={assignStaff} style={{ marginBottom: 12 }}>
           <h3>Assign staff to a job</h3>
           <label>
@@ -280,7 +313,7 @@ export default function AgencyPage() {
               onChange={(e) => setAssignForm({ ...assignForm, requestId: e.target.value })}
             >
               <option value="">Select…</option>
-              {jobs.map((j) => (
+              {jobChoices.map((j) => (
                 <option key={j._id} value={j._id}>
                   {j.serviceDetails} ({j.status})
                 </option>
@@ -332,7 +365,8 @@ export default function AgencyPage() {
           <button type="submit">Assign</button>
         </form>
         <div className="list">
-          {jobs.map((r) => (
+          {visibleJobs.length === 0 ? <p className="muted">No jobs match.</p> : null}
+          {visibleJobs.map((r) => (
             <div className="item stack" key={r._id}>
               <StatusBadge status={r.status} />
               <div>{r.serviceDetails}</div>

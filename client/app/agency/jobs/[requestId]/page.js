@@ -7,6 +7,7 @@ import { api } from '../../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../../components/ui';
 import { formatScheduleRange } from '../../../../components/DateTimeRangePicker';
 import { MINIMUM_WAGE_PER_HOUR } from '../../../../lib/jobPay';
+import FilterBar, { matchesQuery } from '../../../../components/FilterBar';
 
 const SWAPPABLE = new Set(['assigned', 'en_route', 'on_site', 'in_progress']);
 
@@ -29,6 +30,7 @@ export default function SwapStaffPage() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [personQuery, setPersonQuery] = useState('');
 
   const load = useCallback(async () => {
     const request = await api(`/api/requests/${requestId}`);
@@ -153,11 +155,21 @@ export default function SwapStaffPage() {
 
           {canSwap && crew.length ? (
             <form className="stack" onSubmit={onSubmit}>
+              <FilterBar
+                query={personQuery}
+                onQuery={setPersonQuery}
+                placeholder="Search staff name"
+                active={Boolean(personQuery.trim())}
+                onClear={() => setPersonQuery('')}
+              />
               <label>
                 Staff A (leave the job)
                 <select value={staffA} onChange={(e) => setStaffA(e.target.value)} required>
                   <option value="">Select…</option>
-                  {crew.map((row) => {
+                  {crew.filter((row) => {
+                    const id = personId(row.staffUserId);
+                    return id === staffA || matchesQuery(personQuery, [row.staffUserId?.name, row.staffUserId?.email]);
+                  }).map((row) => {
                     const id = personId(row.staffUserId);
                     return (
                       <option key={id} value={id}>
@@ -171,7 +183,10 @@ export default function SwapStaffPage() {
                 Staff B (take the job)
                 <select value={staffB} onChange={(e) => setStaffB(e.target.value)} required>
                   <option value="">Select…</option>
-                  {replacements.map((row) => {
+                  {replacements.filter((row) => {
+                    const id = personId(row.user);
+                    return id === staffB || matchesQuery(personQuery, [row.user?.name, row.user?.email]);
+                  }).map((row) => {
                     const id = personId(row.user);
                     return (
                       <option key={id} value={id}>
