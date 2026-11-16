@@ -7,6 +7,7 @@ import { api } from '../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../components/ui';
 import { formatScheduleRange } from '../../../components/DateTimeRangePicker';
 import { formatPaySummary } from '../../../lib/jobPay';
+import { scheduleKindLabel } from '../../../lib/jobHours';
 
 const ACTIVE = new Set(['assigned', 'en_route', 'on_site', 'in_progress']);
 
@@ -27,20 +28,6 @@ const COMPLETION = {
   unmatched: 'Closed with no match.',
   cancelled: 'Cancelled before completion.',
 };
-
-function scheduleLabel(request) {
-  if (request?.jobType === 'fixed') return 'One visit';
-  if (request?.jobType === 'recurring_indefinite') return 'Weekly, no end';
-  if (request?.jobType === 'recurring_until') {
-    const until = request.recurrenceUntil ? new Date(request.recurrenceUntil) : null;
-    const date =
-      until && !Number.isNaN(until.getTime())
-        ? until.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
-        : '';
-    return date ? `Weekly until ${date}` : 'Weekly until a date';
-  }
-  return 'One window';
-}
 
 function agencyIdOf(request) {
   const value = request?.assignedAgencyId;
@@ -88,9 +75,11 @@ function OfferCard({ item, mode, busy, onInterest, onLock, onProgress, onAssign 
         <StatusBadge status={request.status} />
         <StatusBadge status={offer.status} />
         <span className="muted">{item.jobType}</span>
-        <span className="job-kind">{scheduleLabel(request)}</span>
+        <span className="job-kind">{scheduleKindLabel(request)}</span>
       </div>
-      <strong>{request.serviceDetails}</strong>
+      <Link href={`/agency/offers/${requestId}`}>
+        <strong>{request.serviceDetails}</strong>
+      </Link>
       <div>{request.address}</div>
       {request.scheduleStart && request.scheduleEnd ? (
         <div className="muted">
@@ -111,6 +100,9 @@ function OfferCard({ item, mode, busy, onInterest, onLock, onProgress, onAssign 
       <div className="muted">
         Offer: {offer.status}
         {offer.distanceKm != null ? ` · ${offer.distanceKm} km away` : ''}
+      </div>
+      <div>
+        <Link href={`/agency/offers/${requestId}`}>View details</Link>
       </div>
       {mode === 'offer' ? (
         <div className="row">

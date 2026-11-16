@@ -260,6 +260,49 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   background: var(--accent-soft);
   color: var(--accent);
 }
+.offer-detail { display: grid; gap: 16px; }
+.offer-hero h1 {
+  margin: 8px 0 4px;
+  font-size: 1.7rem;
+  line-height: 1.2;
+}
+.offer-hero p { margin: 0; }
+.offer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 16px;
+  align-items: start;
+}
+.offer-layout .staff-facts { grid-template-columns: 1fr; }
+.offer-pay {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 1.25rem;
+}
+.offer-party {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+.offer-action {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+}
+@media (max-width: 800px) {
+  .offer-layout { grid-template-columns: 1fr; }
+  .offer-party { flex-direction: column; }
+}
 .badge.paid { background: #dff5e6; color: var(--ok); }
 .badge.unpaid, .badge.failed { background: #f8e2e2; color: var(--danger); }
 

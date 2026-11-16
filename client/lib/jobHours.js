@@ -71,6 +71,20 @@ function countLabel(n, one, many) {
   return `${value} ${value === 1 ? one : many}`;
 }
 
+export function scheduleKindLabel(request) {
+  if (request?.jobType === 'fixed') return 'One visit';
+  if (request?.jobType === 'recurring_indefinite') return 'Weekly, no end';
+  if (request?.jobType === 'recurring_until') {
+    const until = request.recurrenceUntil ? new Date(request.recurrenceUntil) : null;
+    const date =
+      until && !Number.isNaN(until.getTime())
+        ? until.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+        : '';
+    return date ? `Weekly until ${date}` : 'Weekly until a date';
+  }
+  return 'One window';
+}
+
 export function describeJob(request) {
   if (!request?.jobType) return null;
   const days = Number(request.durationDays || 0);

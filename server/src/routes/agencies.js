@@ -148,62 +148,93 @@ router.post(
   }
 );
 
+async function loadAgencyOffers(agencyId, requestId) {
+  const filter = { kind: 'agency', agencyId };
+  if (requestId) filter.requestId = requestId;
+  const offers = await RequestOffer.find(filter).sort({ createdAt: -1 });
+  const requestIds = offers.map((o) => o.requestId);
+  const requests = requestIds.length
+    ? await CleaningRequest.find({
+        _id: { $in: requestIds },
+        ...notDeletedFilter,
+      })
+        .populate('clientId', 'name email role')
+        .populate('businessId', 'name phone address latitude longitude')
+    : [];
+  const byId = new Map(requests.map((r) => [String(r._id), r]));
+  const interests = await AgencyJobInterest.find({
+    agencyId,
+    requestId: { $in: requestIds },
+  });
+  const interestByRequest = new Map(interests.map((row) => [String(row.requestId), row.status]));
+  const shaped = [];
+  for (const offer of offers) {
+    const doc = byId.get(String(offer.requestId));
+    if (!doc) continue;
+    const plain = await hydrateRequest(doc);
+    const client = plain.clientId && plain.clientId.name ? plain.clientId : null;
+    const business = plain.businessId && plain.businessId.name ? plain.businessId : null;
+    const selectedId = plain.selectedAgencyId?._id || plain.selectedAgencyId;
+    shaped.push({
+      request: plain,
+      offer: {
+        id: offer._id,
+        status: offer.status,
+        distanceKm: offer.distanceKm,
+        expiresAt: offer.expiresAt,
+        notifiedAt: offer.notifiedAt,
+      },
+      jobType: business ? 'Business' : 'Personal client',
+      owner: client
+        ? { name: client.name, email: client.email, role: client.role }
+        : null,
+      businessName: business ? business.name : null,
+      business: business
+        ? {
+            name: business.name,
+            phone: business.phone,
+            address: business.address,
+            latitude: business.latitude,
+            longitude: business.longitude,
+          }
+        : null,
+      interestStatus: interestByRequest.get(String(plain._id)) || null,
+      canLock: plain.status === 'open' && String(selectedId || '') === String(agencyId),
+    });
+  }
+  return shaped;
+}
+
 router.get('/:agencyId/offers', requireAuth, requireRole('cleaning_agency'), async (req, res) => {
   try {
     if (!(await isAgencyOwnerOrAdmin(req.user.id, req.params.agencyId))) {
       return res.status(403).json({ error: 'Forbidden' });
     }
-    const offers = await RequestOffer.find({
-      kind: 'agency',
-      agencyId: req.params.agencyId,
-    }).sort({ createdAt: -1 });
-    const requestIds = offers.map((o) => o.requestId);
-    const requests = await CleaningRequest.find({
-      _id: { $in: requestIds },
-      ...notDeletedFilter,
-    })
-      .populate('clientId', 'name email role')
-      .populate('businessId', 'name');
-    const byId = new Map(requests.map((r) => [String(r._id), r]));
-    const interests = await AgencyJobInterest.find({
-      agencyId: req.params.agencyId,
-      requestId: { $in: requestIds },
-    });
-    const interestByRequest = new Map(
-      interests.map((row) => [String(row.requestId), row.status])
-    );
-    const shaped = [];
-    for (const offer of offers) {
-      const doc = byId.get(String(offer.requestId));
-      if (!doc) continue;
-      const plain = await hydrateRequest(doc);
-      const client = plain.clientId && plain.clientId.name ? plain.clientId : null;
-      const business = plain.businessId && plain.businessId.name ? plain.businessId : null;
-      const selectedId = plain.selectedAgencyId?._id || plain.selectedAgencyId;
-      shaped.push({
-        request: plain,
-        offer: {
-          id: offer._id,
-          status: offer.status,
-          distanceKm: offer.distanceKm,
-          expiresAt: offer.expiresAt,
-          notifiedAt: offer.notifiedAt,
-        },
-        jobType: business ? 'Business' : 'Personal client',
-        owner: client
-          ? { name: client.name, email: client.email, role: client.role }
-          : null,
-        businessName: business ? business.name : null,
-        interestStatus: interestByRequest.get(String(plain._id)) || null,
-        canLock:
-          plain.status === 'open' && String(selectedId || '') === String(req.params.agencyId),
-      });
-    }
-    res.json(shaped);
+    res.json(await loadAgencyOffers(req.params.agencyId));
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
+
+router.get(
+  '/:agencyId/offers/:requestId',
+  requireAuth,
+  requireRole('cleaning_agency'),
+  async (req, res) => {
+    try {
+      if (!(await isAgencyOwnerOrAdmin(req.user.id, req.params.agencyId))) {
+        return res.status(403).json({ error: 'Forbidden' });
+      }
+      const rows = await loadAgencyOffers(req.params.agencyId, req.params.requestId);
+      if (!rows.length) {
+        return res.status(404).json({ error: 'This job was not offered to your agency' });
+      }
+      res.json(rows[0]);
+    } catch (err) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  }
+);
 
 router.get(
   '/:agencyId/jobs',

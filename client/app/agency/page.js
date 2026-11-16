@@ -196,7 +196,7 @@ export default function AgencyPage() {
                   <StatusBadge status={offer.status} />
                   <span className="muted">{offer.distanceKm} km</span>
                 </div>
-                <div>{request.serviceDetails}</div>
+                <Link href={`/agency/offers/${request._id}`}>{request.serviceDetails}</Link>
                 <JobMap
                   address={request.address}
                   latitude={request.latitude}
@@ -211,6 +211,7 @@ export default function AgencyPage() {
                   <div className="muted">Company pay: {formatPaySummary(request.pay)}</div>
                 ) : null}
                 <div className="row">
+                  <Link href={`/agency/offers/${request._id}`}>View details</Link>
                   <button type="button" onClick={() => expressInterest(request._id)}>
                     Express interest
                   </button>
