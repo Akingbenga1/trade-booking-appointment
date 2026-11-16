@@ -376,7 +376,8 @@ router.post(
   requireRole('cleaning_agency'),
   async (req, res) => {
     try {
-      const { agencyId, staffUserId, payRatePerHour, allocatedHours, allocatedDays } = req.body;
+      const { agencyId, staffUserId, payRatePerHour, allocatedHours, allocatedDays, workStart, workEnd } =
+        req.body;
       const many = Array.isArray(req.body.staff);
       if (!agencyId || (!many && (!staffUserId || payRatePerHour == null))) {
         return res
@@ -390,6 +391,8 @@ router.post(
             payRatePerHour,
             allocatedHours,
             allocatedDays,
+            workStart,
+            workEnd,
           });
       res.json(request);
     } catch (err) {

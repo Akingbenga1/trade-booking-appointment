@@ -296,4 +296,58 @@ describe('cleaning agency booking', () => {
     assert.equal(untilJob.totalHours, 24);
     assert.equal(untilJob.pay.totalAmount, 312);
   });
+
+  it('stores a calendar shift and rejects a time outside the job window', async () => {
+    const scheduleStart = new Date(Date.now() + 6 * 86400000);
+    scheduleStart.setHours(9, 0, 0, 0);
+    const scheduleEnd = new Date(scheduleStart);
+    scheduleEnd.setHours(17, 0, 0, 0);
+    const req = await createCleaningRequest({
+      clientId: client._id,
+      serviceDetails: 'Calendar shift',
+      scheduleStart,
+      scheduleEnd,
+      address: '4 Job St',
+      latitude: hub.lat,
+      longitude: hub.lng,
+    });
+    await expressAgencyInterest(req._id, agency._id, owner._id);
+    await pickAgencyForRequest(req._id, agency._id, {
+      id: client._id.toString(),
+      role: 'client',
+    });
+    await agencyAcceptRequest(req._id, agency._id, owner._id);
+
+    const tooLate = new Date(scheduleEnd);
+    tooLate.setHours(19, 0, 0, 0);
+    await assert.rejects(
+      () =>
+        assignAgencyStaff(req._id, agency._id, owner._id, {
+          staffUserId: staff._id,
+          payRatePerHour: 13,
+          workStart: scheduleStart,
+          workEnd: tooLate,
+        }),
+      /inside the job window/
+    );
+
+    const workEnd = new Date(scheduleStart);
+    workEnd.setHours(13, 0, 0, 0);
+    await assignAgencyStaff(req._id, agency._id, owner._id, {
+      staffUserId: staff._id,
+      payRatePerHour: 13,
+      workStart: scheduleStart,
+      workEnd,
+    });
+    const assignment = await JobAssignment.findOne({
+      requestId: req._id,
+      staffUserId: staff._id,
+      confirmStatus: 'pending',
+    });
+    assert.equal(assignment.workStart.getTime(), scheduleStart.getTime());
+    assert.equal(assignment.workEnd.getTime(), workEnd.getTime());
+    const pay = await StaffJobPay.findOne({ requestId: req._id, staffUserId: staff._id });
+    assert.equal(pay.durationHours, 4);
+    assert.equal(pay.totalAmount, 52);
+  });
 });

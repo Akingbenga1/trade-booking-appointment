@@ -123,6 +123,52 @@ export function parseAllocatedHours({ allocatedHours, allocatedDays } = {}) {
   throw fail('Say how much time this person will work, in hours or days');
 }
 
+/**
+ * Hours for one staff member.
+ * A calendar window (workStart/workEnd) is the normal path.
+ * Hour or day counts remain for older callers.
+ */
+export function resolveStaffShare(request, row = {}) {
+  const hasWindow = row.workStart != null && row.workStart !== '' && row.workEnd != null && row.workEnd !== '';
+  if (!hasWindow) {
+    return { hours: parseAllocatedHours(row), workStart: null, workEnd: null };
+  }
+
+  const start = new Date(row.workStart);
+  const end = new Date(row.workEnd);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end.getTime() <= start.getTime()) {
+    throw fail('Choose a start and an end on the calendar');
+  }
+  const hours = roundHours((end.getTime() - start.getTime()) / 3600000);
+  if (!(hours > 0)) throw fail('Choose a start and an end on the calendar');
+
+  const jobStart = new Date(request.scheduleStart);
+  const repeating = request.jobType === 'recurring_indefinite' || request.jobType === 'recurring_until';
+  if (repeating) {
+    const visit = Number(request.visitHours) || Number(request.totalHours) || 0;
+    if (visit > 0 && hours - visit > 0.001) {
+      throw fail(`One visit is ${visit} hours. Pick a start and end inside that length.`);
+    }
+    if (start.getTime() < jobStart.getTime()) {
+      throw fail('The start is before the job begins');
+    }
+    if (request.jobType === 'recurring_until' && request.recurrenceUntil) {
+      const until = new Date(request.recurrenceUntil);
+      until.setHours(23, 59, 59, 999);
+      if (start.getTime() > until.getTime()) {
+        throw fail('The start is after this job stops repeating');
+      }
+    }
+  } else {
+    const jobEnd = new Date(request.scheduleEnd);
+    if (start.getTime() < jobStart.getTime() || end.getTime() > jobEnd.getTime()) {
+      throw fail('Pick dates and times inside the job window');
+    }
+  }
+
+  return { hours, workStart: start, workEnd: end };
+}
+
 /** Hours the agency may hand out. Explicit job total wins; older jobs use the schedule window. */
 export function jobHourBudget(request) {
   if (request?.totalHours > 0) return roundHours(request.totalHours);

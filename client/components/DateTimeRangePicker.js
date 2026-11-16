@@ -76,7 +76,7 @@ export function formatScheduleRange(start, end) {
  * value: { scheduleStart: Date|null, scheduleEnd: Date|null }
  * onChange(next)
  */
-export function DateTimeRangePicker({ value, onChange }) {
+export function DateTimeRangePicker({ value, onChange, minDate, maxDate }) {
   const start = value?.scheduleStart ? new Date(value.scheduleStart) : null;
   const end = value?.scheduleEnd ? new Date(value.scheduleEnd) : null;
   const [cursor, setCursor] = useState(() => startOfDay(start || new Date()));
@@ -191,6 +191,10 @@ export function DateTimeRangePicker({ value, onChange }) {
       <div className="dtrp-grid">
         {days.map((d) => {
           const inMonth = d.getMonth() === cursor.getMonth();
+          const dayTime = startOfDay(d).getTime();
+          const tooEarly = minDate && dayTime < startOfDay(minDate).getTime();
+          const tooLate = maxDate && dayTime > startOfDay(maxDate).getTime();
+          const blocked = Boolean(tooEarly || tooLate);
           const isStart = sameDay(d, start);
           const isEnd = sameDay(d, end);
           const inRange =
@@ -212,6 +216,7 @@ export function DateTimeRangePicker({ value, onChange }) {
               key={d.toISOString()}
               type="button"
               className={cls}
+              disabled={blocked}
               onClick={() => onPickDay(d)}
             >
               {d.getDate()}
