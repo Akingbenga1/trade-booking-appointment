@@ -30,7 +30,7 @@ import {
   assertHoursFit,
   buildJobSchedule,
   jobHourBudget,
-  parseAllocatedHours,
+  resolveStaffShare,
   roundHours,
 } from './jobHours.js';
 import { listRequestEvents, recordRequestEvent } from './requestEvents.js';
@@ -706,7 +706,7 @@ export async function assignAgencyStaff(
   requestId,
   agencyId,
   actorUserId,
-  { staffUserId, payRatePerHour, allocatedHours, allocatedDays }
+  { staffUserId, payRatePerHour, allocatedHours, allocatedDays, workStart, workEnd }
 ) {
   if (!(await isAgencyOwnerOrAdmin(actorUserId, agencyId))) {
     const err = new Error('Forbidden');
@@ -736,7 +736,8 @@ export async function assignAgencyStaff(
     throw err;
   }
 
-  const hours = parseAllocatedHours({ allocatedHours, allocatedDays });
+  const share = resolveStaffShare(request, { workStart, workEnd, allocatedHours, allocatedDays });
+  const hours = share.hours;
   const used = await allocatedHoursForRequest(requestId);
   assertHoursFit(jobHourBudget(request), used, hours);
   const payFields = quoteHourlyPay(payRatePerHour, hours);
@@ -762,6 +763,8 @@ export async function assignAgencyStaff(
     agencyId,
     staffUserId,
     confirmStatus: 'pending',
+    workStart: share.workStart,
+    workEnd: share.workEnd,
     assignedAt: new Date(),
   });
   await StaffJobPay.create({
@@ -793,7 +796,7 @@ export async function assignAgencyStaff(
     body: 'Your agency assigned you to a cleaning job. Please confirm or decline.',
     requestId,
   });
-  await queueStaffAssignmentEmail(request, agencyId, staffUserId, payFields);
+  await queueStaffAssignmentEmail(request, agencyId, staffUserId, payFields, share);
 
   return hydrateRequest(request);
 }
@@ -810,7 +813,7 @@ function formatJobWindow(start, end) {
   return `${from} to ${to}`;
 }
 
-async function queueStaffAssignmentEmail(request, agencyId, staffUserId, payFields) {
+async function queueStaffAssignmentEmail(request, agencyId, staffUserId, payFields, share) {
   try {
     const [staffUser, agency] = await Promise.all([
       User.findById(staffUserId).select('name email'),
@@ -827,10 +830,15 @@ async function queueStaffAssignmentEmail(request, agencyId, staffUserId, payFiel
       `Address: ${request.address}`,
       `When: ${formatJobWindow(request.scheduleStart, request.scheduleEnd)}`,
       `Your hours: ${payFields.durationHours}`,
+      share?.workStart
+        ? `Your time: ${formatJobWindow(share.workStart, share.workEnd)}`
+        : null,
       `Your pay: ${gbp(payFields.payRatePerHour)} per hour, ${gbp(payFields.totalAmount)} in total`,
       '',
       `Sign in: ${config.clientOrigin}`,
-    ].join('\n');
+    ]
+      .filter((line) => line != null)
+      .join('\n');
     enqueueEmail({
       to: staffUser.email,
       subject: `${agencyName} assigned you to a job`,
@@ -866,7 +874,6 @@ export async function assignAgencyStaffMany(requestId, agencyId, actorUserId, st
       err.status = 400;
       throw err;
     }
-    parseAllocatedHours(row);
   }
 
   const request = await CleaningRequest.findById(requestId);
@@ -875,7 +882,7 @@ export async function assignAgencyStaffMany(requestId, agencyId, actorUserId, st
     err.status = 404;
     throw err;
   }
-  const incoming = staff.reduce((sum, row) => sum + parseAllocatedHours(row), 0);
+  const incoming = staff.reduce((sum, row) => sum + resolveStaffShare(request, row).hours, 0);
   const used = await allocatedHoursForRequest(requestId);
   assertHoursFit(jobHourBudget(request), used, incoming);
 
@@ -884,7 +891,10 @@ export async function assignAgencyStaffMany(requestId, agencyId, actorUserId, st
     latest = await assignAgencyStaff(requestId, agencyId, actorUserId, {
       staffUserId: row.staffUserId,
       payRatePerHour: row.payRatePerHour,
-      allocatedHours: parseAllocatedHours(row),
+      allocatedHours: row.allocatedHours,
+      allocatedDays: row.allocatedDays,
+      workStart: row.workStart,
+      workEnd: row.workEnd,
     });
   }
   return latest;

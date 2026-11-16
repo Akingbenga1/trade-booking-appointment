@@ -29,6 +29,8 @@ const jobAssignmentSchema = new mongoose.Schema(
       default: 'pending',
       index: true,
     },
+    workStart: Date,
+    workEnd: Date,
     assignedAt: { type: Date, default: Date.now },
     respondedAt: Date,
   },

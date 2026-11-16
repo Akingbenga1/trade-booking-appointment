@@ -5,15 +5,43 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api } from '../../../../../lib/api';
 import { StatusBadge, TopBar, useRequireRole } from '../../../../../components/ui';
-import { formatScheduleRange } from '../../../../../components/DateTimeRangePicker';
+import { DateTimeRangePicker, formatScheduleRange } from '../../../../../components/DateTimeRangePicker';
 import { MINIMUM_WAGE_PER_HOUR, formatGbp } from '../../../../../lib/jobPay';
-import { allocatedHours, describeJob, HOURS_PER_DAY } from '../../../../../lib/jobHours';
+import { describeJob, HOURS_PER_DAY } from '../../../../../lib/jobHours';
 
 const OPEN_FOR_CREW = new Set(['assigned', 'en_route', 'on_site', 'in_progress']);
 
 function personId(person) {
   if (!person) return '';
   return String(person._id || person);
+}
+
+function hoursBetween(start, end) {
+  if (!start || !end) return null;
+  const hours = (new Date(end).getTime() - new Date(start).getTime()) / 3600000;
+  if (!Number.isFinite(hours) || hours <= 0) return null;
+  return Math.round(hours * 100) / 100;
+}
+
+function defaultStaffWindow(job) {
+  const start = new Date(job.scheduleStart);
+  let end = new Date(job.scheduleEnd);
+  if (job.jobType === 'recurring_indefinite' || job.jobType === 'recurring_until') {
+    const visit = Number(job.visitHours) || 1;
+    end = new Date(start.getTime() + visit * 3600000);
+  }
+  if (!(end.getTime() > start.getTime())) end = new Date(start.getTime() + 3600000);
+  return { scheduleStart: start, scheduleEnd: end };
+}
+
+function calendarBounds(job) {
+  if (!job?.scheduleStart) return {};
+  const minDate = new Date(job.scheduleStart);
+  if (job.jobType === 'recurring_indefinite') return { minDate };
+  if (job.jobType === 'recurring_until' && job.recurrenceUntil) {
+    return { minDate, maxDate: new Date(job.recurrenceUntil) };
+  }
+  return { minDate, maxDate: job.scheduleEnd ? new Date(job.scheduleEnd) : undefined };
 }
 
 export default function AssignStaffPage() {
@@ -25,7 +53,7 @@ export default function AssignStaffPage() {
   const [staff, setStaff] = useState([]);
   const [picked, setPicked] = useState({});
   const [rates, setRates] = useState({});
-  const [timeChoices, setTimeChoices] = useState({});
+  const [windows, setWindows] = useState({});
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -65,19 +93,18 @@ export default function AssignStaffPage() {
     return rates[id] ?? String(MINIMUM_WAGE_PER_HOUR);
   }
 
-  function choiceFor(id) {
-    return timeChoices[id] || { unit: 'hours', amount: '' };
-  }
-
-  function setChoice(id, patch) {
-    setTimeChoices((current) => ({
-      ...current,
-      [id]: { unit: 'hours', amount: '', ...(current[id] || {}), ...patch },
-    }));
+  function windowFor(id) {
+    return windows[id] || (job ? defaultStaffWindow(job) : null);
   }
 
   function toggle(id) {
-    setPicked((current) => ({ ...current, [id]: !current[id] }));
+    setPicked((current) => {
+      const next = !current[id];
+      if (next && job) {
+        setWindows((wins) => (wins[id] ? wins : { ...wins, [id]: defaultStaffWindow(job) }));
+      }
+      return { ...current, [id]: next };
+    });
   }
 
   async function assignSelected(e) {
@@ -92,19 +119,23 @@ export default function AssignStaffPage() {
     const staffBody = [];
     for (const row of chosen) {
       const id = personId(row.user);
-      const choice = choiceFor(id);
-      const hours = allocatedHours(choice.unit, choice.amount);
+      const window = windowFor(id);
+      const hours = hoursBetween(window?.scheduleStart, window?.scheduleEnd);
       if (hours == null) {
-        setError('Enter days or hours for every person you selected.');
+        setError('Choose a start and an end on the calendar for every person you selected.');
         return;
       }
       staffBody.push({
         staffUserId: id,
         payRatePerHour: Number(rateFor(id)),
-        allocatedHours: hours,
+        workStart: new Date(window.scheduleStart).toISOString(),
+        workEnd: new Date(window.scheduleEnd).toISOString(),
       });
     }
-    const asked = staffBody.reduce((sum, row) => sum + row.allocatedHours, 0);
+    const asked = chosen.reduce((sum, row) => {
+      const window = windowFor(personId(row.user));
+      return sum + (hoursBetween(window?.scheduleStart, window?.scheduleEnd) || 0);
+    }, 0);
     if (job.hoursRemaining != null && asked - job.hoursRemaining > 0.0001) {
       const left = Number(job.hoursRemaining);
       const askedLabel = `${asked} hour${asked === 1 ? '' : 's'}`;
@@ -209,6 +240,9 @@ export default function AssignStaffPage() {
                       <strong>{row.staffUserId?.name || 'Staff'}</strong>
                       <StatusBadge status={row.confirmStatus} />
                     </div>
+                    {row.workStart && row.workEnd ? (
+                      <div className="muted">Works {formatScheduleRange(row.workStart, row.workEnd)}</div>
+                    ) : null}
                     {pay ? (
                       <div>
                         {pay.durationHours} hours · {formatGbp(pay.payRatePerHour)}/hr ={' '}
@@ -240,8 +274,11 @@ export default function AssignStaffPage() {
             <form className="card stack" onSubmit={assignSelected}>
               <h2>Add staff</h2>
               <p className="muted">
-                Choose one person or several. Give each a share of the hours, in hours or in days.
-                The shares cannot add up to more than the hours still free.
+                Tick a person, then choose their start and end on the calendar. Set the clock times
+                under the month. The shares cannot add up to more than the hours still free.
+                {job.jobType === 'recurring_indefinite' || job.jobType === 'recurring_until'
+                  ? ' For a weekly job, pick one visit. That time repeats each week.'
+                  : ' The time must sit inside the job window.'}
               </p>
               {available.length === 0 ? (
                 <p className="muted">
@@ -252,13 +289,16 @@ export default function AssignStaffPage() {
               <div className="list">
                 {available.map((row) => {
                   const id = personId(row.user);
-                  const choice = choiceFor(id);
-                  const share = picked[id] ? allocatedHours(choice.unit, choice.amount) : null;
+                  const chosenWindow = picked[id] ? windowFor(id) : null;
+                  const share = chosenWindow
+                    ? hoursBetween(chosenWindow.scheduleStart, chosenWindow.scheduleEnd)
+                    : null;
                   const rate = Number(rateFor(id));
                   const pay =
                     share != null && Number.isFinite(rate)
                       ? Math.round(rate * share * 100) / 100
                       : null;
+                  const bounds = calendarBounds(job);
                   return (
                     <div className="item stack" key={id}>
                       <label className="row" style={{ color: 'inherit' }}>
@@ -273,28 +313,16 @@ export default function AssignStaffPage() {
                           {row.user?.email ? ` · ${row.user.email}` : ''}
                         </span>
                       </label>
-                      <div className="row">
-                        <label>
-                          Time unit
-                          <select
-                            value={choice.unit}
-                            onChange={(e) => setChoice(id, { unit: e.target.value })}
-                          >
-                            <option value="hours">Hours</option>
-                            <option value="days">Days (8 hours)</option>
-                          </select>
-                        </label>
-                        <label>
-                          {choice.unit === 'days' ? 'Days' : 'Hours'}
-                          <input
-                            type="number"
-                            min="0.25"
-                            step="0.25"
-                            value={choice.amount}
-                            onChange={(e) => setChoice(id, { amount: e.target.value })}
-                          />
-                        </label>
-                      </div>
+                      {picked[id] && chosenWindow ? (
+                        <DateTimeRangePicker
+                          value={chosenWindow}
+                          minDate={bounds.minDate}
+                          maxDate={bounds.maxDate}
+                          onChange={(next) =>
+                            setWindows((current) => ({ ...current, [id]: next }))
+                          }
+                        />
+                      ) : null}
                       <label>
                         Pay £/hr
                         <input
@@ -309,7 +337,7 @@ export default function AssignStaffPage() {
                       </label>
                       <div className="muted">
                         {share == null
-                          ? 'Enter time to see their pay.'
+                          ? 'Tick this person to choose their dates and times.'
                           : `${share} hours. Will be paid ${formatGbp(pay)} if they carry out that share.`}
                         {Number.isFinite(rate) && rate < MINIMUM_WAGE_PER_HOUR
                           ? ` Rate must be at least £${MINIMUM_WAGE_PER_HOUR} per hour.`
