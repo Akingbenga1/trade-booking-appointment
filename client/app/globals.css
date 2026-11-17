@@ -378,6 +378,8 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   .offer-layout { grid-template-columns: 1fr; }
   .offer-party { flex-direction: column; }
 }
+.badge.interested, .badge.selected { background: #dff5e6; color: var(--ok); }
+.badge.withdrawn { background: #f0ece4; color: #666; }
 .badge.paid { background: #dff5e6; color: var(--ok); }
 .badge.unpaid, .badge.failed { background: #f8e2e2; color: var(--danger); }
 

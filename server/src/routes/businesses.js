@@ -4,6 +4,7 @@ import {
   createBusinessForUser,
   listBusinessesForUser,
 } from '../services/businessService.js';
+import { listAgenciesForBusiness } from '../services/businessAgencies.js';
 import { User } from '../models/User.js';
 
 const router = Router();
@@ -14,6 +15,15 @@ router.get('/', requireAuth, requireRole('business'), async (req, res) => {
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/:businessId/agencies', requireAuth, requireRole('business'), async (req, res) => {
+  try {
+    const board = await listAgenciesForBusiness(req.user, req.params.businessId);
+    res.json(board);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
