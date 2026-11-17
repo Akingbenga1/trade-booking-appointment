@@ -15,6 +15,7 @@ import { JobAssignment } from './models/JobAssignment.js';
 import { StaffJobPay } from './models/StaffJobPay.js';
 import { BusinessPayment } from './models/BusinessPayment.js';
 import { Transaction } from './models/Transaction.js';
+import { BoardTool } from './models/BoardTool.js';
 import {
   agencyAcceptRequest,
   assignAgencyStaff,
@@ -61,6 +62,7 @@ export async function seedDemo({ reset = true } = {}) {
       StaffJobPay.deleteMany({}),
       BusinessPayment.deleteMany({}),
       Transaction.deleteMany({}),
+      BoardTool.deleteMany({}),
       User.deleteMany({}),
     ]);
   }
@@ -164,6 +166,55 @@ export async function seedDemo({ reset = true } = {}) {
   });
 
   await seedAssignedJobs({ business, bizUser, agency, owner: agencyOwner, staff });
+  await seedBoardTools();
+}
+
+const BOARD_TOOLS = [
+  ['Everyday tools', 'Vacuum cleaner', 'Lifts dust from carpets, rugs, and hard floors.'],
+  ['Everyday tools', 'Mop and bucket with a wringer', 'Washes tile, vinyl, and laminate without leaving the floor soaked.'],
+  ['Everyday tools', 'Colour-coded microfibre cloths', 'One colour for the kitchen, one for the bathroom, one for general surfaces, and one for glass.'],
+  ['Everyday tools', 'Broom and dustpan', 'Sweeps loose dirt, including corners a vacuum misses, before you mop.'],
+  ['Everyday tools', 'Scrub brush', 'Works on grout, skirting boards, and marks a cloth will not shift.'],
+  ['Everyday tools', 'Squeegee', 'Clears water from glass, mirrors, and wet floors without streaks.'],
+  ['Everyday tools', 'Cleaning caddy or trolley', 'Carries bottles, cloths, and bags from room to room.'],
+  ['Everyday tools', 'Labelled spray bottles', 'Hold diluted cleaner. A label on every bottle stops the wrong product being used.'],
+  ['Everyday tools', 'High-level duster', 'Reaches cobwebs, vents, and the tops of cupboards.'],
+  ['Machines for larger sites', 'Steam cleaner', 'Hot steam loosens grease and stains on tiles, cookers, and upholstery.'],
+  ['Machines for larger sites', 'Floor buffer', 'Puts a shine on hard floors in corridors and receptions.'],
+  ['Machines for larger sites', 'Backpack vacuum', 'Lets a cleaner move quickly through stairs and a large office.'],
+  ['Cleaning products', 'Multi-surface cleaner', 'The everyday cleaner for desks, doors, and most indoor surfaces.'],
+  ['Cleaning products', 'Disinfectant', 'For handles, switches, and other places people touch often.'],
+  ['Cleaning products', 'Bathroom cleaner', 'Cuts soap scum and limescale on sinks, showers, and tiles.'],
+  ['Cleaning products', 'Toilet cleaner', 'Stays on the bowl long enough to clean it. Keep it off other surfaces.'],
+  ['Cleaning products', 'Glass cleaner', 'For windows and mirrors.'],
+  ['Cleaning products', 'Degreaser', 'For kitchen hobs, splashbacks, and greasy floors.'],
+  ['Cleaning products', 'Floor cleaner for that floor', 'Match the product to wood, tile, or vinyl so the finish is not damaged.'],
+  ['Safety gear', 'Nitrile gloves', 'For day-to-day cleaning and for handling products.'],
+  ['Safety gear', 'Chemical-resistant gloves', 'When the label says the liquid is stronger than a normal spray.'],
+  ['Safety gear', 'Safety glasses', 'When you dilute or spray a product that can splash.'],
+  ['Safety gear', 'Mask', 'When the job is dusty, or the product label says to cover your nose and mouth.'],
+  ['Safety gear', 'Non-slip shoes', 'Floors are wet while you mop. Closed shoes with a grip reduce falls.'],
+  ['Safety gear', 'Apron', 'Keeps clothes dry during wet work.'],
+  ['Safety gear', 'Wet floor sign', 'Put it out before the floor is wet, and leave it until the floor is dry.'],
+  ['Safety gear', 'Spill kit', 'Absorbent material, gloves, and bags for a chemical spill.'],
+  ['Safety gear', 'First aid kit', 'For cuts and splashes on the job.'],
+  ['Items you replace', 'Bin liners', 'In the sizes the sites you clean actually use.'],
+  ['Items you replace', 'Spare mop heads and cloths', 'Replace them when they stay dirty after washing.'],
+  ['Items you replace', 'Paper roll', 'For spills, glass, and wiping up before a disinfectant.'],
+  ['Items you replace', 'Washroom restock', 'Hand soap and paper towels, when the job includes keeping the washroom stocked.'],
+];
+
+export async function seedBoardTools() {
+  await BoardTool.deleteMany({});
+  const newest = Date.now();
+  await BoardTool.insertMany(
+    BOARD_TOOLS.map(([category, name, detail], index) => ({
+      category,
+      name,
+      detail,
+      createdAt: new Date(newest - index * 1000),
+    }))
+  );
 }
 
 function futureAt(daysAhead, hour) {
