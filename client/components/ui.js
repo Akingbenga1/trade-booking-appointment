@@ -203,6 +203,11 @@ export function TopBar({ title }) {
             My jobs
           </Link>
         ) : null}
+        {user?.role === 'business' ? (
+          <Link href="/client/agencies" className="muted">
+            Agencies
+          </Link>
+        ) : null}
         {user?.role === 'business' || user?.role === 'client' ? (
           <Link href="/client/archived" className="muted">
             Archived
