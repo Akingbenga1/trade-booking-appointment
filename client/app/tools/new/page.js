@@ -4,13 +4,12 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import PublicBar from '../../../components/PublicBar';
 import { api } from '../../../lib/api';
-import { CLEANING_KIT } from '../../../lib/cleaningTools';
 
 export default function NewToolPage() {
   const router = useRouter();
   const [name, setName] = useState('');
   const [detail, setDetail] = useState('');
-  const [category, setCategory] = useState(CLEANING_KIT[0].id);
+  const [category, setCategory] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -19,11 +18,15 @@ export default function NewToolPage() {
     setLoading(true);
     setError('');
     try {
-      await api('/api/tools', {
+      const saved = await api('/api/tools', {
         method: 'POST',
         body: { name, detail, category },
       });
-      router.push(`/tools#${category}`);
+      const slug = String(saved.category || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+      router.push(`/tools#${slug || 'section'}`);
     } catch (err) {
       setError(err.message);
       setLoading(false);
@@ -53,13 +56,12 @@ export default function NewToolPage() {
         </label>
         <label>
           Section
-          <select value={category} onChange={(event) => setCategory(event.target.value)}>
-            {CLEANING_KIT.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.title}
-              </option>
-            ))}
-          </select>
+          <input
+            required
+            maxLength={80}
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+          />
         </label>
         {error ? <div className="error">{error}</div> : null}
         <button disabled={loading} type="submit">

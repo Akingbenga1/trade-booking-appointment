@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { BoardTool, TOOL_CATEGORIES } from '../models/BoardTool.js';
+import { BoardTool } from '../models/BoardTool.js';
 
 const router = Router();
 
@@ -24,7 +24,6 @@ function toPublicTool(doc) {
     name: doc.name,
     detail: doc.detail,
     category: doc.category,
-    added: true,
   };
 }
 
@@ -37,10 +36,7 @@ router.post('/', async (req, res) => {
   try {
     const name = requiredText(req.body.name, 'Name', 80);
     const detail = requiredText(req.body.detail, 'What it is for', 400);
-    const category = String(req.body.category || '');
-    if (!TOOL_CATEGORIES.includes(category)) {
-      return res.status(400).json({ error: 'Choose a section for this item' });
-    }
+    const category = requiredText(req.body.category, 'Section', 80);
     const doc = await BoardTool.create({ name, detail, category });
     res.status(201).json(toPublicTool(doc));
   } catch (err) {
