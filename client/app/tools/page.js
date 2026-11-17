@@ -1,9 +1,20 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import PublicBar from '../../components/PublicBar';
+import { api } from '../../lib/api';
 import { CLEANING_KIT } from '../../lib/cleaningTools';
 
 export default function CleaningToolsPage() {
+  const [added, setAdded] = useState([]);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api('/api/tools')
+      .then((rows) => setAdded(Array.isArray(rows) ? rows : []))
+      .catch((err) => setError(err.message));
+  }, []);
+
   return (
     <div className="shell">
       <PublicBar
@@ -17,6 +28,7 @@ export default function CleaningToolsPage() {
       <p className="muted">
         Do not mix cleaning products. Bleach mixed with another cleaner can give off a dangerous gas.
       </p>
+      {error ? <div className="error">{error}</div> : null}
       <nav className="public-links" aria-label="Kit sections">
         {CLEANING_KIT.map((group) => (
           <a key={group.id} href={`#${group.id}`}>
@@ -37,6 +49,15 @@ export default function CleaningToolsPage() {
                 <p className="muted">{item.detail}</p>
               </article>
             ))}
+            {added
+              .filter((item) => item.category === group.id)
+              .map((item) => (
+                <article className="card tool-card" key={item.id}>
+                  <h3>{item.name}</h3>
+                  <p className="muted">{item.detail}</p>
+                  <p className="job-kind">Added</p>
+                </article>
+              ))}
           </div>
         </section>
       ))}

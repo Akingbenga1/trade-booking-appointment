@@ -15,6 +15,7 @@ import businessRoutes from './routes/businesses.js';
 import agencyRoutes from './routes/agencies.js';
 import placesRoutes from './routes/places.js';
 import paymentRoutes from './routes/payments.js';
+import toolRoutes from './routes/tools.js';
 import { handleStripeWebhook } from './services/paymentService.js';
 import { startEmailQueueWorker } from './services/emailQueue.js';
 import { startDeliveryQueueWorker } from './services/deliveryQueue.js';
@@ -63,6 +64,7 @@ app.use('/api/businesses', businessRoutes);
 app.use('/api/agencies', agencyRoutes);
 app.use('/api/places', placesRoutes);
 app.use('/api/payments', paymentRoutes);
+app.use('/api/tools', toolRoutes);
 
 app.use((err, _req, res, _next) => {
   res.status(err.status || 500).json({ error: err.message || 'Server error' });

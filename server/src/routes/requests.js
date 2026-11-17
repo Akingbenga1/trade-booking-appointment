@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { CleaningRequest } from '../models/CleaningRequest.js';
+import { BoardListing } from '../models/BoardListing.js';
 import { RequestOffer } from '../models/RequestOffer.js';
 import { JobAssignment } from '../models/JobAssignment.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -28,6 +29,7 @@ import { isBusinessMember, listBusinessesForUser } from '../services/businessSer
 import { isAgencyMember } from '../services/agencyService.js';
 import { attachPayToRequests } from '../services/jobPay.js';
 import { parsePlaceFields } from '../services/place.js';
+import { parseScheduleRange } from '../services/schedule.js';
 
 const router = Router();
 
@@ -252,6 +254,50 @@ function toPublicBoardOffer(doc) {
   };
 }
 
+function listingToOffer(doc) {
+  const pay =
+    doc.payRatePerHour != null && doc.durationHours != null
+      ? {
+          payRatePerHour: doc.payRatePerHour,
+          durationHours: doc.durationHours,
+          totalAmount: doc.totalAmount,
+          currency: 'GBP',
+        }
+      : null;
+  return {
+    id: doc._id,
+    serviceDetails: doc.serviceDetails,
+    address: doc.address,
+    status: 'open',
+    scheduleStart: doc.scheduleStart,
+    scheduleEnd: doc.scheduleEnd,
+    jobType: doc.jobType || '',
+    visitHours: doc.visitHours,
+    recurrenceUntil: doc.recurrenceUntil,
+    postedBy: doc.postedBy,
+    businessName: doc.businessName || '',
+    pay,
+    createdAt: doc.createdAt,
+  };
+}
+
+function requiredText(value, label, max) {
+  const text = String(value || '').trim();
+  if (!text) {
+    const err = new Error(`${label} is required`);
+    err.status = 400;
+    throw err;
+  }
+  if (text.length > max) {
+    const err = new Error(`${label} must be ${max} characters or fewer`);
+    err.status = 400;
+    throw err;
+  }
+  return text;
+}
+
+const BOARD_JOB_TYPES = new Set(['fixed', 'recurring_indefinite', 'recurring_until']);
+
 router.get('/board', async (_req, res) => {
   try {
     const list = await CleaningRequest.find(notDeletedFilter)
@@ -259,7 +305,68 @@ router.get('/board', async (_req, res) => {
       .populate('businessId', 'name');
     const plain = list.map((doc) => doc.toObject());
     await attachPayToRequests(plain);
-    res.json(plain.map(toPublicBoardOffer));
+    const listings = await BoardListing.find().sort({ createdAt: -1 });
+    const offers = [...listings.map(listingToOffer), ...plain.map(toPublicBoardOffer)];
+    offers.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    res.json(offers);
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+router.post('/board', async (req, res) => {
+  try {
+    const serviceDetails = requiredText(req.body.serviceDetails, 'Job name', 200);
+    const address = requiredText(req.body.address, 'Address', 300);
+    const postedBy = req.body.postedBy === 'business' ? 'business' : req.body.postedBy === 'personal' ? 'personal' : '';
+    if (!postedBy) return res.status(400).json({ error: 'Choose who is posting the job' });
+    const businessName = postedBy === 'business' ? requiredText(req.body.businessName, 'Business name', 120) : '';
+    const schedule = parseScheduleRange(req.body.scheduleStart, req.body.scheduleEnd);
+    const jobType = String(req.body.jobType || '');
+    if (jobType && !BOARD_JOB_TYPES.has(jobType)) {
+      return res.status(400).json({ error: 'Choose a schedule type' });
+    }
+    let recurrenceUntil;
+    if (jobType === 'recurring_until') {
+      recurrenceUntil = new Date(req.body.recurrenceUntil);
+      if (Number.isNaN(recurrenceUntil.getTime())) {
+        return res.status(400).json({ error: 'Choose the date the weekly job ends' });
+      }
+      if (recurrenceUntil.getTime() < schedule.scheduleStart.getTime()) {
+        return res.status(400).json({ error: 'The end date must be on or after the first visit' });
+      }
+    }
+    let visitHours;
+    let payRatePerHour;
+    let durationHours;
+    let totalAmount;
+    if (req.body.hours !== '' && req.body.hours != null) {
+      visitHours = Number(req.body.hours);
+      if (!Number.isFinite(visitHours) || visitHours <= 0 || visitHours > 1000) {
+        return res.status(400).json({ error: 'Hours must be a number above 0' });
+      }
+      durationHours = visitHours;
+    }
+    if (req.body.payRatePerHour !== '' && req.body.payRatePerHour != null) {
+      payRatePerHour = Number(req.body.payRatePerHour);
+      if (!Number.isFinite(payRatePerHour) || payRatePerHour <= 0 || payRatePerHour > 1000) {
+        return res.status(400).json({ error: 'Pay per hour must be a number above 0' });
+      }
+      if (durationHours != null) totalAmount = Math.round(payRatePerHour * durationHours * 100) / 100;
+    }
+    const doc = await BoardListing.create({
+      serviceDetails,
+      address,
+      ...schedule,
+      postedBy,
+      businessName,
+      ...(jobType ? { jobType } : {}),
+      ...(recurrenceUntil ? { recurrenceUntil } : {}),
+      ...(visitHours != null ? { visitHours, durationHours } : {}),
+      ...(payRatePerHour != null ? { payRatePerHour } : {}),
+      ...(totalAmount != null ? { totalAmount } : {}),
+    });
+    res.status(201).json(listingToOffer(doc));
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

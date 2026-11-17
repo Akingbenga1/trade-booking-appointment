@@ -32,6 +32,10 @@ a { color: var(--accent); }
   padding: 24px 16px 48px;
 }
 
+.public-form {
+  max-width: 560px;
+}
+
 .public-top {
   flex-wrap: wrap;
   align-items: flex-start;

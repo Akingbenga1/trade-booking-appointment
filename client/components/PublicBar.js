@@ -11,7 +11,9 @@ export default function PublicBar({ title, subtitle }) {
       </div>
       <div className="public-links">
         <Link href="/jobs">Job offers</Link>
+        <Link href="/jobs/new">Add a job</Link>
         <Link href="/tools">Tools and equipment</Link>
+        <Link href="/tools/new">Add a tool</Link>
         <Link href="/">Sign in</Link>
       </div>
     </div>

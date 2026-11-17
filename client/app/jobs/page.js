@@ -74,7 +74,10 @@ export default function PublicJobsPage() {
         {jobs.length > 0 && visible.length === 0 ? <p className="muted">No job offers match.</p> : null}
         {jobs.length === 0 && !error ? <p className="muted">No job offers yet.</p> : null}
         {visible.map((job) => {
-          const summary = describeJob(job);
+          const summary =
+            job.visitHours != null && (job.jobType !== 'recurring_until' || job.visitCount != null)
+              ? describeJob(job)
+              : null;
           return (
             <article className="card stack" key={job.id}>
               <div className="row">
