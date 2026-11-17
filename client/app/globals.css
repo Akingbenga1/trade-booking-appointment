@@ -62,6 +62,30 @@ a { color: var(--accent); }
   margin: 0;
 }
 
+.tool-card a {
+  word-break: break-word;
+}
+
+.tool-contact {
+  display: grid;
+  gap: 6px;
+  margin: 4px 0 0;
+}
+
+.tool-contact div {
+  display: grid;
+  gap: 1px;
+}
+
+.tool-contact dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.tool-contact dd {
+  margin: 0;
+}
+
 .topbar {
   display: flex;
   justify-content: space-between;

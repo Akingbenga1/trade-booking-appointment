@@ -204,6 +204,34 @@ const BOARD_TOOLS = [
   ['Items you replace', 'Washroom restock', 'Hand soap and paper towels, when the job includes keeping the washroom stocked.'],
 ];
 
+const TOOL_CONTACTS = {
+  'Everyday tools': {
+    contactName: 'Ada Supplies',
+    email: 'ada.supplies@example.com',
+    phone: '+44 20 7946 0101',
+  },
+  'Machines for larger sites': {
+    contactName: 'Ben Machines',
+    email: 'ben.machines@example.com',
+    phone: '+44 20 7946 0202',
+  },
+  'Cleaning products': {
+    contactName: 'Cara Chemicals',
+    email: 'cara.chemicals@example.com',
+    phone: '+44 20 7946 0303',
+  },
+  'Safety gear': {
+    contactName: 'Dan Safety',
+    email: 'dan.safety@example.com',
+    phone: '+44 20 7946 0404',
+  },
+  'Items you replace': {
+    contactName: 'Eve Restock',
+    email: 'eve.restock@example.com',
+    phone: '+44 20 7946 0505',
+  },
+};
+
 export async function seedBoardTools() {
   await BoardTool.deleteMany({});
   const newest = Date.now();
@@ -212,6 +240,7 @@ export async function seedBoardTools() {
       category,
       name,
       detail,
+      ...TOOL_CONTACTS[category],
       createdAt: new Date(newest - index * 1000),
     }))
   );

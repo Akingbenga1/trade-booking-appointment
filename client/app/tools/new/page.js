@@ -10,6 +10,9 @@ export default function NewToolPage() {
   const [name, setName] = useState('');
   const [detail, setDetail] = useState('');
   const [category, setCategory] = useState('');
+  const [contactName, setContactName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +23,7 @@ export default function NewToolPage() {
     try {
       const saved = await api('/api/tools', {
         method: 'POST',
-        body: { name, detail, category },
+        body: { name, detail, category, contactName, email, phone },
       });
       const slug = String(saved.category || '')
         .toLowerCase()
@@ -41,7 +44,7 @@ export default function NewToolPage() {
       />
       <form className="card stack public-form" onSubmit={onSubmit}>
         <label>
-          Name
+          Tool name
           <input required maxLength={80} value={name} onChange={(event) => setName(event.target.value)} />
         </label>
         <label>
@@ -61,6 +64,35 @@ export default function NewToolPage() {
             maxLength={80}
             value={category}
             onChange={(event) => setCategory(event.target.value)}
+          />
+        </label>
+        <label>
+          Contact name
+          <input
+            required
+            maxLength={80}
+            value={contactName}
+            onChange={(event) => setContactName(event.target.value)}
+          />
+        </label>
+        <label>
+          Email
+          <input
+            required
+            type="email"
+            maxLength={120}
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+          />
+        </label>
+        <label>
+          Phone
+          <input
+            required
+            type="tel"
+            maxLength={30}
+            value={phone}
+            onChange={(event) => setPhone(event.target.value)}
           />
         </label>
         {error ? <div className="error">{error}</div> : null}

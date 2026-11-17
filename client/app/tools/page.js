@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import PublicBar from '../../components/PublicBar';
+import FilterBar, { matchesQuery } from '../../components/FilterBar';
 import { api } from '../../lib/api';
 
 function sectionId(category) {
@@ -31,6 +32,7 @@ function groupTools(rows) {
 export default function CleaningToolsPage() {
   const [tools, setTools] = useState([]);
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     api('/api/tools')
@@ -38,16 +40,31 @@ export default function CleaningToolsPage() {
       .catch((err) => setError(err.message));
   }, []);
 
-  const groups = groupTools(tools);
+  const visible = tools.filter((item) =>
+    matchesQuery(query, [item.name, item.detail, item.category, item.contactName, item.email, item.phone])
+  );
+  const groups = groupTools(visible);
 
   return (
     <div className="shell">
       <PublicBar
         title="Tools and equipment"
-        subtitle="Items saved for cleaners and cleaning agencies. No sign-in is needed."
+        subtitle="Each item shows who to contact, with a name, email, and phone. No sign-in is needed."
       />
       {error ? <div className="error">{error}</div> : null}
+      <form className="card stack" onSubmit={(event) => event.preventDefault()}>
+        <FilterBar
+          query={query}
+          onQuery={setQuery}
+          placeholder="Search tool, name, email, or phone"
+          count={visible.length}
+          total={tools.length}
+          active={Boolean(query.trim())}
+          onClear={() => setQuery('')}
+        />
+      </form>
       {tools.length === 0 && !error ? <p className="muted">No tools yet.</p> : null}
+      {tools.length > 0 && visible.length === 0 ? <p className="muted">No tools match.</p> : null}
       {groups.length > 0 ? (
         <nav className="public-links" aria-label="Kit sections">
           {groups.map((group) => (
@@ -65,6 +82,24 @@ export default function CleaningToolsPage() {
               <article className="card tool-card" key={item.id}>
                 <h3>{item.name}</h3>
                 <p className="muted">{item.detail}</p>
+                <dl className="tool-contact">
+                  <div>
+                    <dt>Name</dt>
+                    <dd>{item.contactName}</dd>
+                  </div>
+                  <div>
+                    <dt>Email</dt>
+                    <dd>
+                      <a href={`mailto:${item.email}`}>{item.email}</a>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>Phone</dt>
+                    <dd>
+                      <a href={`tel:${item.phone}`}>{item.phone}</a>
+                    </dd>
+                  </div>
+                </dl>
               </article>
             ))}
           </div>
